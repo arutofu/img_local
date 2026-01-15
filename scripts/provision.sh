@@ -50,6 +50,9 @@ EXTRA_APT_PACKAGES="${EXTRA_APT_PACKAGES:-}"
 ENABLE_ROS_AUTOSTART="${ENABLE_ROS_AUTOSTART:-true}"
 ENABLE_ROSBRIDGE="${ENABLE_ROSBRIDGE:-true}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9090}"
+ROSBRIDGE_IN_DRONE_LAUNCH=\"${ROSBRIDGE_IN_DRONE_LAUNCH:-true}\"
+ENABLE_WEB_VIDEO_SERVER=\"${ENABLE_WEB_VIDEO_SERVER:-true}\"
+WEB_VIDEO_PORT=\"${WEB_VIDEO_PORT:-8080}\"
 ENABLE_BUTTERFLY="${ENABLE_BUTTERFLY:-true}"
 BUTTERFLY_PORT="${BUTTERFLY_PORT:-57575}"
 
@@ -400,6 +403,17 @@ install_ros_web_tools() {
     apt_policy_dump
     die "Failed to install rosbridge-server"
   }
+
+if [[ "${ENABLE_WEB_VIDEO_SERVER}" == "true" ]]; then
+  info "Install ROS video tools (web_video_server)"
+  apt_install "ros-${ROS_DISTRO}-web-video-server" || {
+    apt_policy_dump
+    die "Failed to install web-video-server"
+  }
+else
+  info "ENABLE_WEB_VIDEO_SERVER=false -> skip web_video_server install"
+fi
+
 }
 
 # -----------------------------
@@ -858,18 +872,55 @@ EOF
   systemctl enable rosbridge-websocket.service 2>/dev/null || true
 }
 
+setup_web_video_server_service() {
+  [[ "${ENABLE_ROS_AUTOSTART}" == "true" ]] || { info "ENABLE_ROS_AUTOSTART=false -> skip web_video_server service"; return 0; }
+  [[ "${ENABLE_WEB_VIDEO_SERVER}" == "true" ]] || { info "ENABLE_WEB_VIDEO_SERVER=false -> skip web_video_server"; return 0; }
+
+  info "Create web-video-server systemd service (http://0.0.0.0:${WEB_VIDEO_PORT})"
+  write_ros_env_file
+
+  cat >/etc/systemd/system/web-video-server.service <<EOF
+[Unit]
+Description=ROS web_video_server (HTTP MJPEG stream)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/ros
+User=${PI_USER}
+Group=${PI_USER}
+WorkingDirectory=/home/${PI_USER}
+ExecStart=/bin/bash -lc 'source /opt/ros/\${ROS_DISTRO}/setup.bash && rosrun web_video_server web_video_server _address:=0.0.0.0 _port:=${WEB_VIDEO_PORT}'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl enable web-video-server.service 2>/dev/null || true
+}
+
 setup_drone_launch_service() {
   [[ "${ENABLE_ROS_AUTOSTART}" == "true" ]] || return 0
 
   info "Create drone systemd service (roslaunch drone drone.launch)"
   write_ros_env_file
 
+  local after_line wants_line
+  after_line="After=network-online.target"
+  wants_line="Wants=network-online.target"
+  if [[ "${ENABLE_ROSBRIDGE}" == "true" ]] && [[ "${ROSBRIDGE_IN_DRONE_LAUNCH}" != "true" ]]; then
+    after_line="After=network-online.target rosbridge-websocket.service"
+    wants_line=$'Wants=network-online.target\nWants=rosbridge-websocket.service'
+  fi
+
   cat >/etc/systemd/system/drone.service <<EOF
 [Unit]
 Description=Drone main ROS launch
-After=network-online.target rosbridge-websocket.service
-Wants=network-online.target
-Wants=rosbridge-websocket.service
+${after_line}
+${wants_line}
 
 [Service]
 Type=simple
@@ -888,13 +939,30 @@ EOF
   systemctl enable drone.service 2>/dev/null || true
 }
 
+# -----------------------------
+# Butterfly (FIXED)
+# -----------------------------
 setup_butterfly_service() {
   [[ "${ENABLE_BUTTERFLY}" == "true" ]] || { info "ENABLE_BUTTERFLY=false -> skip"; return 0; }
   info "Install butterfly web terminal + systemd service on :${BUTTERFLY_PORT}"
 
-  # butterfly удобнее через pip (пакета apt на buster может не быть)
-  apt_install python3-pip || true
-  my_travis_retry pip3 install --no-cache-dir butterfly || true
+  apt_install python3 python3-pip || true
+
+  # Use python3 -m pip to avoid mismatched pip/pip3
+  my_travis_retry python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel || true
+  my_travis_retry python3 -m pip install --no-cache-dir --upgrade butterfly || true
+
+  # Determine real server entrypoint (launcher 'butterfly' may not accept --host/--port)
+  local server_bin launcher
+  server_bin="$(command -v butterfly.server.py 2>/dev/null || true)"
+  if [[ -z "${server_bin}" ]]; then
+    launcher="$(command -v butterfly 2>/dev/null || true)"
+    if [[ -n "${launcher}" ]] && [[ -f "$(dirname "${launcher}")/butterfly.server.py" ]]; then
+      server_bin="$(dirname "${launcher}")/butterfly.server.py"
+    fi
+  fi
+  [[ -n "${server_bin}" ]] || [[ -f /usr/local/bin/butterfly.server.py ]] && server_bin="${server_bin:-/usr/local/bin/butterfly.server.py}"
+  [[ -n "${server_bin}" ]] || die "butterfly.server.py not found after install. Check: ls -la /usr/local/bin | grep -i butterfly"
 
   cat >/etc/systemd/system/butterfly.service <<EOF
 [Unit]
@@ -907,7 +975,7 @@ Type=simple
 User=${PI_USER}
 Group=${PI_USER}
 WorkingDirectory=/home/${PI_USER}
-ExecStart=/bin/bash -lc 'exec butterfly --host=0.0.0.0 --port=${BUTTERFLY_PORT} --unsecure'
+ExecStart=/bin/bash -lc 'exec ${server_bin} --host=0.0.0.0 --port=${BUTTERFLY_PORT} --unsecure'
 Restart=on-failure
 RestartSec=2
 
@@ -916,6 +984,7 @@ WantedBy=multi-user.target
 EOF
 
   systemctl enable butterfly.service 2>/dev/null || true
+  systemctl daemon-reload 2>/dev/null || true
 }
 
 # -----------------------------
@@ -966,6 +1035,7 @@ setup_roswww_static_update_service
 # ROS autostart services
 setup_rosbridge_service
 setup_drone_launch_service
+setup_web_video_server_service
 setup_butterfly_service
 
 info "Generate web pages now (best-effort)"
