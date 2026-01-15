@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2020 Copter Express Technologies
+#
+# Author: Oleg Kalachev <okalachev@gmail.com>
+#
+# Distributed under MIT License (available at https://opensource.org/licenses/MIT).
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# TODO: add custom header, footer
+# TODO: symlinks or copy param
+
+import os
+import shutil
+import rospkg
+
+rospack = rospkg.RosPack()
+print('rospack:', rospack)
+
+www = rospkg.get_ros_home() + '/www'
+print('www:', www)
+
+index_file = os.environ.get('ROSWWW_INDEX')
+print('index_file:', index_file)
+
+default_package = os.environ.get('ROSWWW_DEFAULT')
+print('default_package:', default_package)
+
+print('using www dir: ' + www)
+shutil.rmtree(www, ignore_errors=True)  # reset www directory content
+os.mkdir(www)
+
+packages = rospack.list()
+
+index = '<h1>Packages list</h1>\n<ul>\n'
+
+for name in packages:
+    path = rospack.get_path(name)
+    if os.path.exists(path + '/www'):
+        print('found www path for %s package' % name)
+        print('Path:', path)
+        os.symlink(path + '/www', www + '/' + name)
+        index += '<li><a href="{name}/">{name}</a></li>'.format(name=name)
+
+if default_package is not None:
+    redirect_html = '<meta http-equiv=refresh content="0; url={name}/">'.format(name=default_package)
+    print(f'Creating redirect HTML for the default package: {default_package}')
+    open(www + '/index.html', 'w').write(redirect_html)
+elif index_file is not None:
+    print('symlinking index file')
+    print(f'Symlinking index file: {index_file}')
+    os.symlink(index_file, www + '/index.html')
+else:
+    print('writing default index')
+    print('Index content:')
+    print(index)
+    open(www + '/index.html', 'w').write(index)
+
+print('Start copying docs')
+
+source_path = '/home/pi/catkin_ws/src/drone/_book'
+destination_path = '/home/pi/.ros/www/drone'
+
+docs_file_path = os.path.join(destination_path, 'docs')
+if os.path.exists(docs_file_path):
+    os.remove(docs_file_path)
+
+docs_path = os.path.join(destination_path, 'docs')
+os.makedirs(docs_path, exist_ok=True)
+
+for root, dirs, files in os.walk(source_path):
+    relative_path = os.path.relpath(root, source_path)
+    target_dir = os.path.join(docs_path, relative_path)
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    for file in files:
+        source_file = os.path.join(root, file)
+        target_file = os.path.join(target_dir, file)
+
+        shutil.copy2(source_file, target_file)
+
+source_path = '/home/pi/catkin_ws/src/drone/_book/assets'
+destination_path = '/home/pi/.ros/www/drone/docs'
+
+docs_file_path = os.path.join(destination_path, 'assets')
+if os.path.exists(docs_file_path):
+    os.remove(docs_file_path)
+
+docs_path = os.path.join(destination_path, 'assets')
+os.makedirs(docs_path, exist_ok=True)
+
+for root, dirs, files in os.walk(source_path):
+    relative_path = os.path.relpath(root, source_path)
+    target_dir = os.path.join(docs_path, relative_path)
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    for file in files:
+        source_file = os.path.join(root, file)
+        target_file = os.path.join(target_dir, file)
+
+        shutil.copy2(source_file, target_file)

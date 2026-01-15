@@ -1,0 +1,25 @@
+<title>Tools</title>
+
+<h1>Tools</h1>
+
+<ul>
+	<li><a href="docs/ru">View documentation</a></li>
+	<li><a href="topics.html">View topics</a></li>
+	<li><a href="" id="wvs">View image topics</a> (<code>web_video_server</code>)</li>
+	<li><a href="" id="butterfly">Open web terminal</a> (<code>Butterfly</code>)</li>
+	<li>View <a href="viz.html">View 3D visualization</a>, <a href="aruco_map.html">3D visualization for markers map</a> (<code>ros3djs</code>)</li>
+	<li><a href="../drone_blocks/">Blocks programming</a> (<code>Blockly</code>)</li>
+</ul>
+
+<script type="text/javascript">
+	document.querySelector("#wvs").href = location.protocol + '//' + location.hostname + ':8080';
+	document.querySelector("#butterfly").href = location.protocol + '//' + location.hostname + ':57575';
+
+	document.querySelector("#butterfly").addEventListener('click', function(e) {
+		if (location.hostname == 'localhost' || location.hostname == '127.0.0.1') {
+			if (!confirm('Please use regular Terminal app on a local machine.\nClick OK to proceed to Butterfly anyway.')) {
+				e.preventDefault();
+			}
+		}
+	});
+</script>
