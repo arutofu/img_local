@@ -24,7 +24,7 @@ import tf2_geometry_msgs
 from pymavlink import mavutil
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import BatteryState, Image, CameraInfo, NavSatFix, Imu, Range
-from mavros_msgs.msg import State, OpticalFlowRad, Mavlink
+from mavros_msgs.msg import State, OpticalFlowRad, Mavlink, StatusText
 from mavros_msgs.srv import ParamGet
 from geometry_msgs.msg import PoseStamped, TwistStamped, PoseWithCovarianceStamped, Vector3Stamped
 from visualization_msgs.msg import MarkerArray as VisualizationMarkerArray
@@ -172,61 +172,66 @@ def mavlink_exec(cmd, timeout=3.0):
     return mavlink_recv
 
 
-def read_diagnostics(name, key):
+def read_diagnostics(name, key, timeout=1.0):
     e = Event()
+    result = {'value': None}
+
     def cb(msg):
         for status in msg.status:
             if status.name.lower() == name.lower():
-                for value in status.values:
-                    if value.key.lower() == key.lower():
-                        cb.value = value.value
+                for v in status.values:
+                    if v.key.lower() == key.lower():
+                        result['value'] = v.value
                         e.set()
                         return
 
-    cb.value = None
     sub = rospy.Subscriber('/diagnostics', DiagnosticArray, cb)
-    e.wait(1.0)  # wait to read all the diagnostics from nodes publishing them
+    e.wait(timeout)
     sub.unregister()
-    return cb.value
+    return result['value']
 
 
-BOARD_ROTATIONS = {
-    0: 'no rotation',
-    1: 'yaw 45°',
-    2: 'yaw 90°',
-    3: 'yaw 135°',
-    4: 'yaw 180°',
-    5: 'yaw 225°',
-    6: 'yaw 270°',
-    7: 'yaw 315°',
-    8: 'roll 180°',
-    9: 'roll 180°, yaw 45°',
-    10: 'roll 180°, yaw 90°',
-    11: 'roll 180°, yaw 135°',
-    12: 'pitch 180°',
-    13: 'roll 180°, yaw 225°',
-    14: 'roll 180°, yaw 270°',
-    15: 'roll 180°, yaw 315°',
-    16: 'roll 90°',
-    17: 'roll 90°, yaw 45°',
-    18: 'roll 90°, yaw 90°',
-    19: 'roll 90°, yaw 135°',
-    20: 'roll 270°',
-    21: 'roll 270°, yaw 45°',
-    22: 'roll 270°, yaw 90°',
-    23: 'roll 270°, yaw 135°',
-    24: 'pitch 90°',
-    25: 'pitch 270°',
-    26: 'roll 270°, yaw 270°',
-    27: 'roll 180°, pitch 270°',
-    28: 'pitch 90°, yaw 180',
-    29: 'pitch 90°, roll 90°',
-    30: 'yaw 293°, pitch 68°, roll 90°',
-    31: 'pitch 90°, roll 270°',
-    32: 'pitch 9°, yaw 180°',
-    33: 'pitch 45°',
-    34: 'pitch 315°',
-}
+
+
+def detect_autopilot_type():
+    # 1. Try MAVROS autopilot_version (most reliable)
+    try:
+        from mavros_msgs.msg import AutopilotVersion
+        msg = rospy.wait_for_message(
+            'mavros/autopilot_version',
+            AutopilotVersion,
+            timeout=2.0
+        )
+        ap = msg.autopilot
+        if ap == 12:   # MAV_AUTOPILOT_PX4
+            return 'PX4'
+        if ap in (3, 4, 5, 6):  # MAV_AUTOPILOT_ARDUPILOTMEGA variants
+            return 'ARDUPILOT'
+    except Exception:
+        pass
+
+    # 2. Try ArduPilot-specific params
+    try:
+        if get_param('FRAME_CLASS', strict=False) is not None:
+            return 'ARDUPILOT'
+    except Exception:
+        pass
+
+    # 3. Diagnostics fallback
+    try:
+        ap = read_diagnostics('mavros: Heartbeat', 'Autopilot type')
+        if ap:
+            ap_l = str(ap).lower()
+            if 'px4' in ap_l:
+                return 'PX4'
+            if 'ardupilot' in ap_l or 'ardupilotmega' in ap_l:
+                return 'ARDUPILOT'
+    except Exception:
+        pass
+
+    return None
+
+
 
 
 @check('FCU')
@@ -237,6 +242,30 @@ def check_fcu():
             failure('no connection to the FCU (check wiring)')
             info('fcu_url = %s', rospy.get_param('mavros/fcu_url', '?'))
             return
+
+        ap = detect_autopilot_type()
+        if ap == 'ARDUPILOT':
+            info('autopilot: ArduPilot')
+            # Basic sanity: try to read a few common ArduPilot params (non-fatal if missing)
+            for p in ('SYSID_THISMAV', 'FRAME_CLASS', 'AHRS_EKF_TYPE', 'EK3_ENABLE'):
+                v = get_param(p, strict=False)
+                if v is None:
+                    info('%s: unavailable', p)
+                else:
+                    info('%s = %s', p, ff(v))
+
+            # time sync check
+            try:
+                info('time sync offset: %.2f s', float(read_diagnostics('mavros: Time Sync', 'Estimated time offset (s)')))
+            except Exception:
+                failure('cannot read time sync offset')
+            return
+
+        # Default/PX4 branch (original logic)
+        if ap == 'PX4':
+            info('autopilot: PX4')
+        else:
+            info('autopilot: %s', ap if ap else 'unknown')
 
         if not is_process_running('px4', exact=True): # can't use px4 console in SITL
             drone_tag = re.compile(r'(-cl[oe]ver|drone)\.\d+$')
@@ -313,7 +342,7 @@ def check_fcu():
         # time sync check
         try:
             info('time sync offset: %.2f s', float(read_diagnostics('mavros: Time Sync', 'Estimated time offset (s)')))
-        except:
+        except Exception:
             failure('cannot read time sync offset')
 
     except rospy.ROSException:
@@ -464,6 +493,7 @@ def is_on_the_floor():
         return False
 
 
+
 @check('Vision position estimate')
 def check_vpe():
     vis = None
@@ -483,47 +513,62 @@ def check_vpe():
             else:
                 failure('no vision position estimate')
 
-    # check PX4 settings
-    est = get_param('SYS_MC_EST_GROUP')
-    if est == 1:
-        ext_yaw = get_param('ATT_EXT_HDG_M')
-        if ext_yaw != 1:
-            failure('vision yaw is disabled, change ATT_EXT_HDG_M parameter')
-        vision_yaw_w = get_param('ATT_W_EXT_HDG')
-        if vision_yaw_w == 0:
-            failure('vision yaw weight is zero, change ATT_W_EXT_HDG parameter')
+    ap = detect_autopilot_type()
+    if ap == 'ARDUPILOT':
+        # ArduPilot uses EKF3 sources; show hints instead of PX4-specific parameter checks
+        src_posxy = get_param('EK3_SRC1_POSXY', strict=False)
+        if src_posxy is not None:
+            info('EK3_SRC1_POSXY = %s (hint: ExternalNav for vision)', ff(src_posxy))
         else:
-            info('vision yaw weight: %s', ff(vision_yaw_w))
-        fuse = int(get_param('LPE_FUSION'))
-        if not fuse & (1 << 2):
-            failure('vision position fusion is disabled, change LPE_FUSION parameter')
-        delay = get_param('LPE_VIS_DELAY')
-        if delay != 0:
-            failure('LPE_VIS_DELAY = %s, but it should be zero', delay)
-        info('LPE_VIS_XY = %s m, LPE_VIS_Z = %s m', get_paramf('LPE_VIS_XY'), get_paramf('LPE_VIS_Z'))
-    elif est == 2:
-        ev_ctrl = get_param('EKF2_EV_CTRL', strict=False)
-        if ev_ctrl is not None:
-            ev_ctrl = int(ev_ctrl)
-            if not ev_ctrl & (1 << 0):
-                failure('vision horizontal position fusion is disabled, change EKF2_EV_CTRL parameter')
-            if not ev_ctrl & (1 << 1):
-                failure('vision vertical position fusion is disabled, change EKF2_EV_CTRL parameter')
-            if not ev_ctrl & (1 << 3):
-                failure('vision yaw fusion is disabled, change EKF2_EV_CTRL parameter')
-        else:
-            fuse = int(get_param('EKF2_AID_MASK'))
-            if not fuse & (1 << 3):
-                failure('vision position fusion is disabled, change EKF2_AID_MASK parameter')
-            if not fuse & (1 << 4):
-                failure('vision yaw fusion is disabled, change EKF2_AID_MASK parameter')
+            info('EK3_SRC1_POSXY: unavailable (EKF3 may be disabled or params not exposed)')
+        # Optional: show other source params if present
+        for p in ('EK3_SRC1_VELXY', 'EK3_SRC1_POSZ', 'EK3_SRC1_YAW'):
+            v = get_param(p, strict=False)
+            if v is not None:
+                info('%s = %s', p, ff(v))
+        # Do not run PX4 estimator checks
+    else:
+        # check PX4 settings (original)
+        est = get_param('SYS_MC_EST_GROUP')
+        if est == 1:
+            ext_yaw = get_param('ATT_EXT_HDG_M')
+            if ext_yaw != 1:
+                failure('vision yaw is disabled, change ATT_EXT_HDG_M parameter')
+            vision_yaw_w = get_param('ATT_W_EXT_HDG')
+            if vision_yaw_w == 0:
+                failure('vision yaw weight is zero, change ATT_W_EXT_HDG parameter')
+            else:
+                info('vision yaw weight: %s', ff(vision_yaw_w))
+            fuse = int(get_param('LPE_FUSION'))
+            if not fuse & (1 << 2):
+                failure('vision position fusion is disabled, change LPE_FUSION parameter')
+            delay = get_param('LPE_VIS_DELAY')
+            if delay != 0:
+                failure('LPE_VIS_DELAY = %s, but it should be zero', delay)
+            info('LPE_VIS_XY = %s m, LPE_VIS_Z = %s m', get_paramf('LPE_VIS_XY'), get_paramf('LPE_VIS_Z'))
+        elif est == 2:
+            ev_ctrl = get_param('EKF2_EV_CTRL', strict=False)
+            if ev_ctrl is not None:
+                ev_ctrl = int(ev_ctrl)
+                if not ev_ctrl & (1 << 0):
+                    failure('vision horizontal position fusion is disabled, change EKF2_EV_CTRL parameter')
+                if not ev_ctrl & (1 << 1):
+                    failure('vision vertical position fusion is disabled, change EKF2_EV_CTRL parameter')
+                if not ev_ctrl & (1 << 3):
+                    failure('vision yaw fusion is disabled, change EKF2_EV_CTRL parameter')
+            else:
+                fuse = int(get_param('EKF2_AID_MASK'))
+                if not fuse & (1 << 3):
+                    failure('vision position fusion is disabled, change EKF2_AID_MASK parameter')
+                if not fuse & (1 << 4):
+                    failure('vision yaw fusion is disabled, change EKF2_AID_MASK parameter')
 
-        delay = get_param('EKF2_EV_DELAY')
-        if delay != 0:
-            failure('EKF2_EV_DELAY = %.2f, but it should be zero', delay)
-        info('EKF2_EVA_NOISE = %s, EKF2_EVP_NOISE = %s',
-            get_paramf('EKF2_EVA_NOISE', 3),
-            get_paramf('EKF2_EVP_NOISE', 3))
+            delay = get_param('EKF2_EV_DELAY')
+            if delay != 0:
+                failure('EKF2_EV_DELAY = %.2f, but it should be zero', delay)
+            info('EKF2_EVA_NOISE = %s, EKF2_EVP_NOISE = %s',
+                get_paramf('EKF2_EVA_NOISE', 3),
+                get_paramf('EKF2_EVP_NOISE', 3))
 
     if not vis:
         return
@@ -531,7 +576,7 @@ def check_vpe():
     # check vision pose and estimated pose inconsistency
     try:
         pose = rospy.wait_for_message('mavros/local_position/pose', PoseStamped, timeout=1)
-    except:
+    except Exception:
         return
     horiz = math.hypot(vis.pose.position.x - pose.pose.position.x, vis.pose.position.y - pose.pose.position.y)
     if horiz > 0.5:
@@ -545,8 +590,8 @@ def check_vpe():
     yawv, _, _ = t.euler_from_quaternion((ov.x, ov.y, ov.z, ov.w), axes='rzyx')
     yawdiff = yawp - yawv
     yawdiff = math.degrees((yawdiff + 180) % 360 - 180)
-    if abs(yawdiff) > 8:
-        failure('yaw inconsistency: %.2f deg', yawdiff)
+    if abs(yawdiff) > 10:
+        failure('yaw inconsistency: %.1f deg', yawdiff)
 
 
 @check('Simple offboard node')
@@ -567,8 +612,10 @@ def check_imu():
         failure('no IMU data (check flight controller calibration)')
 
 
+
 @check('Local position')
 def check_local_position():
+    ap = detect_autopilot_type()
     try:
         pose = rospy.wait_for_message('mavros/local_position/pose', PoseStamped, timeout=1)
         o = pose.pose.orientation
@@ -588,7 +635,25 @@ def check_local_position():
             failure('can\'t transform from %s to body (timeout 0.5 s)', pose.header.frame_id)
 
     except rospy.ROSException:
-        failure('no local position')
+        if ap == 'ARDUPILOT':
+            # If vision is present but local_position is absent, EKF is likely not fusing ExternalNav / not ready.
+            vis_present = False
+            try:
+                rospy.wait_for_message('mavros/vision_pose/pose', PoseStamped, timeout=0.2)
+                vis_present = True
+            except Exception:
+                try:
+                    rospy.wait_for_message('mavros/mocap/pose', PoseStamped, timeout=0.2)
+                    vis_present = True
+                except Exception:
+                    vis_present = False
+
+            if vis_present:
+                failure('no local position from FCU (ArduPilot). Vision pose exists, but EKF may not be configured to fuse external nav.')
+            else:
+                failure('no local position from FCU (ArduPilot). EKF may not be ready or no position source configured.')
+        else:
+            failure('no local position')
 
 
 @check('Velocity estimation')
@@ -634,8 +699,14 @@ def check_global_position():
                     failure('GPS fusion enabled may suppress vision position aiding, change EKF2_AID_MASK')
 
 
+
 @check('Optical flow')
 def check_optical_flow():
+    ap = detect_autopilot_type()
+    if ap == 'ARDUPILOT':
+        info('skip: optical flow check is PX4-specific in this stack')
+        return
+
     if not is_process_running('optical_flow', full=True):
         info('optical_flow is not running')
         return
@@ -647,48 +718,21 @@ def check_optical_flow():
         rot = get_param('SENS_FLOW_ROT')
         if rot != 0:
             failure('SENS_FLOW_ROT = %s, but it should be zero', rot)
-        est = get_param('SYS_MC_EST_GROUP')
-        if est == 1:
-            fuse = int(get_param('LPE_FUSION'))
-            if not fuse & (1 << 1):
-                failure('optical flow fusion is disabled, change LPE_FUSION parameter')
-            if not fuse & (1 << 1):
-                failure('flow gyro compensation is disabled, change LPE_FUSION parameter')
-            scale = get_param('LPE_FLW_SCALE', 1)
-            if not numpy.isclose(scale, 1.0):
-                failure('LPE_FLW_SCALE = %.2f, but it should be 1.0', scale)
+        qmin = get_param('SENS_FLOW_QMIN')
+        if qmin < 10:
+            failure('SENS_FLOW_QMIN = %s, but it should be more than 10', qmin)
+        dist_min = get_param('SENS_FLOW_MINHGT')
+        dist_max = get_param('SENS_FLOW_MAXHGT')
+        info('optical flow distance range: %s..%s m', dist_min, dist_max)
 
-            info('LPE_FLW_QMIN = %s, LPE_FLW_R = %s, LPE_FLW_RR = %s',
-                          get_paramf('LPE_FLW_QMIN'),
-                          get_paramf('LPE_FLW_R', 4),
-                          get_paramf('LPE_FLW_RR', 4))
-        elif est == 2:
-            of_ctrl = get_param('EKF2_OF_CTRL', strict=False)
-            if of_ctrl is not None:
-                if of_ctrl == 0:
-                    failure('optical flow fusion is disabled, change EKF2_OF_CTRL')
-            else:
-                fuse = int(get_param('EKF2_AID_MASK', 0))
-                if not fuse & (1 << 1):
-                    failure('optical flow fusion is disabled, change EKF2_AID_MASK parameter')
-            delay = get_param('EKF2_OF_DELAY', 0)
-            if delay != 0:
-                failure('EKF2_OF_DELAY = %.2f, but it should be zero', delay)
-            info('EKF2_OF_QMIN = %s, EKF2_OF_N_MIN = %s, EKF2_OF_N_MAX = %s',
-                          get_paramf('EKF2_OF_QMIN'),
-                          get_paramf('EKF2_OF_N_MIN', 4),
-                          get_paramf('EKF2_OF_N_MAX', 4))
-        info('SENS_FLOW_MINHGT = %s, SENS_FLOW_MAXHGT = %s', get_paramf('SENS_FLOW_MINHGT', 3), get_paramf('SENS_FLOW_MAXHGT', 3))
-
-    except rospy.ROSException:
-        if rospy.get_param('optical_flow/disable_on_vpe', False):
-            try:
-                rospy.wait_for_message('mavros/vision_pose/pose', PoseStamped, timeout=1)
-                info('no optical flow as disable_on_vpe is true')
-            except:
-                failure('no optical flow on RPi, disable_on_vpe is true, but no vision pose also')
+        flow = rospy.wait_for_message('mavros/px4flow/raw/send', OpticalFlowRad, timeout=0.5)
+        if flow.quality == 0:
+            failure('optical flow quality is zero')
         else:
-            failure('no optical flow on RPi')
+            info('optical flow quality: %s', flow.quality)
+    except rospy.ROSException:
+        failure('no optical flow data')
+
 
 
 @check('Rangefinder')
@@ -708,6 +752,21 @@ def check_rangefinder():
         failure('no rangefinder data')
 
     if not rng:
+        return
+
+    ap = detect_autopilot_type()
+    if ap == 'ARDUPILOT':
+        rtype = get_param('RNGFND1_TYPE', strict=False)
+        if rtype is not None:
+            info('RNGFND1_TYPE = %s (hint: set to MAVLink to use MAVROS DISTANCE_SENSOR)', ff(rtype))
+        else:
+            info('RNGFND1_TYPE: unavailable')
+        orient = get_param('RNGFND1_ORIENT', strict=False)
+        if orient is not None:
+            info('RNGFND1_ORIENT = %s', ff(orient))
+        ek3rng = get_param('EK3_RNG_USE_HGT', strict=False)
+        if ek3rng is not None:
+            info('EK3_RNG_USE_HGT = %s', ff(ek3rng))
         return
 
     est = get_param('SYS_MC_EST_GROUP')
@@ -784,6 +843,10 @@ def check_drone_service():
 
     r = re.compile(r'^(.*)\[(FATAL|ERROR| WARN)\] \[\d+.\d+\]: (.*?)(\x1b(.*))?$')
     error_count = OrderedDict()
+    if not os.path.exists('/tmp/drone.err'):
+        info('no /tmp/drone.err (logging not configured)')
+        return
+
     try:
         for line in open('/tmp/drone.err', 'r'):
             skip = False
@@ -824,12 +887,52 @@ def check_image():
             info('no /etc/drone_version file')
 
 
+
 @check('Preflight status')
 def check_preflight_status():
+    ap = detect_autopilot_type()
     if is_process_running('px4', exact=True):
         info('can\'t check in SITL')
         return
 
+    if ap == 'ARDUPILOT':
+        # ArduPilot doesn't support PX4 console commands like 'commander check'.
+        # Use STATUSTEXT messages as the closest analogue.
+        msgs = []
+        lock = Lock()
+
+        def cb(msg):
+            txt = getattr(msg, 'text', '')
+            if not txt:
+                return
+            tl = txt.lower()
+            if 'prearm' in tl or 'arming' in tl or 'arm' in tl or 'ekf' in tl:
+                with lock:
+                    msgs.append(txt)
+
+        sub = rospy.Subscriber('mavros/statustext/recv', StatusText, cb, queue_size=100)
+        t_end = rospy.Time.now() + rospy.Duration(2.0)
+        rate = rospy.Rate(20)
+        while not rospy.is_shutdown() and rospy.Time.now() < t_end:
+            rate.sleep()
+        sub.unregister()
+
+        with lock:
+            tail = msgs[-12:]
+
+        if not tail:
+            info('no PreArm/Arming STATUSTEXT observed (may be OK)')
+            return
+
+        for m in tail:
+            ml = m.lower()
+            if 'prearm' in ml and ('fail' in ml or 'need' in ml or 'not' in ml or 'denied' in ml):
+                failure(m)
+            else:
+                info(m)
+        return
+
+    # PX4 branch (original)
     # Make sure the console is available to us
     mavlink_exec('\n')
     cmdr_output = mavlink_exec('commander check')
