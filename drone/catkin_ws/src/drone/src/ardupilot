@@ -69,7 +69,7 @@ class ArduPilotAdapter:
             m = (self.state.mode or "").upper()
             if m in ("OFFBOARD", "POSCTL", "ALTCTL") or "AUTO" in m and "MISSION" in m:
                 return "px4"
-            if m in ("STABILIZE", "ALT_HOLD", "LOITER", "GUIDED", "AUTO"):
+            if m in ("STABILIZE", "ALT_HOLD", "LOITER", "GUIDED_NOGPS", "AUTO"):
                 return "ardupilot"
 
         return None

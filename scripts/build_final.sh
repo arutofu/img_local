@@ -61,10 +61,17 @@ OUT_XZ="${OUT_IMG}.xz"
 
 mv -f "$WORK_IMG" "$OUT_IMG"
 sync
+sleep 2
 
 echo "Compressing image to xz..."
 xz -T0 -6 --verbose "$OUT_IMG"
-rm -f "$OUT_IMG"
+
+# xz -T1 -5 --no-sparse "$OUT_IMG"
+
+xz -t "$OUT_IMG.xz"
+
+# rm -f "$OUT_IMG"
+
 
 BUILD_END_EPOCH="$(date +%s)"
 BUILD_SECS="$((BUILD_END_EPOCH - BUILD_START_EPOCH))"

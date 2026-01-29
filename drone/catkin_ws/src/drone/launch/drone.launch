@@ -54,6 +54,11 @@
 
     <!-- simplified offboard control -->
     <node name="simple_offboard" pkg="drone" type="simple_offboard" output="screen" clear_params="true">
+        <!-- ВАЖНО: фикс для ArduPilot -->
+        <param name="force_autopilot" value="ardupilot"/> <!-- can be commented or deleted for px-ardupilot compatibility, simple_offboard can autodetect -->
+        <param name="ap_nav_mode" value="GUIDED"/>
+        <param name="ap_land_mode" value="LAND"/>
+        
         <param name="reference_frames/main_camera_optical" value="map"/>
         <param name="terrain_frame_mode" value="range"/>
     </node>
