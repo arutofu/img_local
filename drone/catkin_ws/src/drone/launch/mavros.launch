@@ -65,6 +65,9 @@
             - sys_status
             - sys_time
             - vision_pose_estimate
+            - fake_gps
+            - statustext
+            - gps_input
             # - vision_speed_estimate
             # - waypoint
         </rosparam>

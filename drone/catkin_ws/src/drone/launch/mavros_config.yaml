@@ -103,7 +103,7 @@ distance_sensor:
 fake_gps:
   # select data source
   use_mocap: true         # ~mocap/pose
-  mocap_transform: true   # ~mocap/tf instead of pose
+  mocap_transform: false   # ~mocap/tf instead of pose
   use_vision: false       # ~vision (pose)
   # origin (default: Zürich)
   geo_origin:
@@ -112,7 +112,7 @@ fake_gps:
     alt: 408.0            # altitude (height over the WGS-84 ellipsoid) [meters]
   eph: 2.0
   epv: 2.0
-  satellites_visible: 5   # virtual number of visible satellites
+  satellites_visible: 12   # virtual number of visible satellites
   fix_type: 3             # type of GPS fix (default: 3D)
   tf:
     listen: false
@@ -120,7 +120,7 @@ fake_gps:
     frame_id: "map"       # TF frame_id
     child_frame_id: "fix" # TF child_frame_id
     rate_limit: 10.0      # TF rate
-  gps_rate: 5.0           # GPS data publishing rate
+  gps_rate: 10.0           # GPS data publishing rate
 
 mocap:
   # select mocap source

@@ -3,206 +3,283 @@
 
 import math
 import time
+from collections import deque
+
 import rospy
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import State, StatusText, PositionTarget
+from mavros_msgs.srv import SetMode, CommandBool, CommandTOL, CommandHome, CommandLong
 
-from drone import srv
-from std_srvs.srv import Trigger
-from mavros_msgs.srv import SetMode, CommandBool
-from mavros_msgs.msg import State
+def log(msg: str):
+    rospy.loginfo(f"[AP] {msg}")
+    print(f"[AP] {msg}")
 
-
-def log(msg):
-    rospy.loginfo(f"[FLIGHT] {msg}")
-    print(f"[FLIGHT] {msg}")
-
-
-class Flight:
+class APCloverLike:
     def __init__(self):
-        rospy.init_node("takeoff_wait_land_verbose", anonymous=True)
+        rospy.init_node("ap_clover_like", anonymous=True)
 
         self.state = None
+        self.pose = None
+        self.statustext = deque(maxlen=50)
+
         rospy.Subscriber("/mavros/state", State, self._cb_state)
+        rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self._cb_pose)
+        rospy.Subscriber("/mavros/statustext/recv", StatusText, self._cb_statustext)
 
-        log("waiting for services...")
+        self.sp_pub = rospy.Publisher("/mavros/setpoint_raw/local", PositionTarget, queue_size=20)
 
-        # drone services (Clover/drone stack)
-        rospy.wait_for_service("get_telemetry")
-        rospy.wait_for_service("navigate")
-        rospy.wait_for_service("land")
-
-        self.get_telemetry = rospy.ServiceProxy("get_telemetry", srv.GetTelemetry)
-        self.navigate = rospy.ServiceProxy("navigate", srv.Navigate)
-        self.land = rospy.ServiceProxy("land", Trigger)
-
-        # mavros services
+        log("waiting for mavros services...")
         rospy.wait_for_service("/mavros/set_mode")
         rospy.wait_for_service("/mavros/cmd/arming")
+        rospy.wait_for_service("/mavros/cmd/takeoff")
+
         self.set_mode = rospy.ServiceProxy("/mavros/set_mode", SetMode)
         self.arming = rospy.ServiceProxy("/mavros/cmd/arming", CommandBool)
+        self.takeoff_srv = rospy.ServiceProxy("/mavros/cmd/takeoff", CommandTOL)
 
-        log("services are ready")
+        # optional services
+        self.land_srv = None
+        self.set_home_srv = None
+        self.cmd_long_srv = None
+
+        try:
+            rospy.wait_for_service("/mavros/cmd/land", timeout=1.0)
+            self.land_srv = rospy.ServiceProxy("/mavros/cmd/land", CommandTOL)
+        except Exception:
+            pass
+
+        try:
+            rospy.wait_for_service("/mavros/cmd/set_home", timeout=1.0)
+            self.set_home_srv = rospy.ServiceProxy("/mavros/cmd/set_home", CommandHome)
+        except Exception:
+            pass
+
+        try:
+            rospy.wait_for_service("/mavros/cmd/command", timeout=1.0)
+            self.cmd_long_srv = rospy.ServiceProxy("/mavros/cmd/command", CommandLong)
+        except Exception:
+            pass
+
+        log("ready.")
 
     def _cb_state(self, s: State):
         self.state = s
 
-    def wait_state(self, timeout=10.0):
-        t0 = time.time()
-        while not rospy.is_shutdown() and (time.time() - t0) < timeout:
-            if self.state is not None and self.state.connected:
-                return True
-            rospy.sleep(0.05)
-        return False
+    def _cb_pose(self, p: PoseStamped):
+        self.pose = p
 
-    def wait_mode(self, mode: str, timeout=10.0):
-        t0 = time.time()
-        while not rospy.is_shutdown() and (time.time() - t0) < timeout:
-            if self.state and self.state.mode == mode:
-                return True
-            rospy.sleep(0.05)
-        return False
+    def _cb_statustext(self, st: StatusText):
+        self.statustext.append((time.time(), st.severity, st.text))
 
-    def wait_armed(self, armed: bool, timeout=10.0):
-        t0 = time.time()
-        while not rospy.is_shutdown() and (time.time() - t0) < timeout:
-            if self.state and self.state.armed == armed:
-                return True
-            rospy.sleep(0.05)
-        return False
-
-    def set_mode_verbose(self, mode: str, timeout=10.0):
-        if not self.state:
-            raise RuntimeError("No mavros/state yet")
-
-        if self.state.mode == mode:
-            log(f"mode already {mode}")
+    def dump_statustext(self, n=12):
+        if not self.statustext:
+            log("no STATUSTEXT yet")
             return
+        log(f"last {min(n,len(self.statustext))} STATUSTEXT (newest last):")
+        for ts, sev, txt in list(self.statustext)[-n:]:
+            log(f"  [sev={sev}] {txt}")
 
+    def wait_connected(self, timeout=10.0):
+        t0 = time.time()
+        while not rospy.is_shutdown() and time.time()-t0 < timeout:
+            if self.state and self.state.connected:
+                return True
+            rospy.sleep(0.05)
+        return False
+
+    def wait_pose(self, timeout=10.0):
+        t0 = time.time()
+        while not rospy.is_shutdown() and time.time()-t0 < timeout:
+            if self.pose:
+                return True
+            rospy.sleep(0.05)
+        return False
+
+    def set_mode_checked(self, mode: str, timeout=5.0):
+        if self.state and self.state.mode == mode:
+            log(f"mode already {mode}")
+            return True
         log(f"setting mode -> {mode}")
         res = self.set_mode(0, mode)
-        log(f"set_mode result: mode_sent={res.mode_sent}")
+        log(f"set_mode: mode_sent={res.mode_sent}")
+        t0 = time.time()
+        while not rospy.is_shutdown() and time.time()-t0 < timeout:
+            if self.state and self.state.mode == mode:
+                log(f"✅ mode is now {mode}")
+                return True
+            rospy.sleep(0.05)
+        self.dump_statustext()
+        return False
 
-        if not self.wait_mode(mode, timeout):
-            cur = self.state.mode if self.state else "unknown"
-            raise RuntimeError(f"Mode switch timed out: want={mode}, current={cur}")
-
-        log(f"✅ mode is now {mode}")
-
-    def arm_verbose(self, timeout=10.0):
-        if not self.state:
-            raise RuntimeError("No mavros/state yet")
-
-        if self.state.armed:
+    def arm_checked(self, timeout=8.0):
+        if self.state and self.state.armed:
             log("already armed")
-            return
-
+            return True
         log("arming...")
         res = self.arming(True)
         log(f"arming ack: success={res.success} result={res.result}")
-
-        if not self.wait_armed(True, timeout):
-            raise RuntimeError("Arming timed out (armed flag did not become True)")
-
-        log("✅ armed=True")
-
-    def ensure_guided_nogps_then_arm(self):
-        """
-        Важно для ArduPilot indoor:
-        1) GUIDED_NOGPS ДО arm
-        2) LAND не armable -> сначала уходим из LAND
-        """
-        if not self.wait_state(10.0):
-            raise RuntimeError("No FCU connection (/mavros/state not connected)")
-
-        log(f"mavros: connected={self.state.connected} mode={self.state.mode} armed={self.state.armed}")
-
-        # Если вдруг мы в LAND — это не armable
-        if self.state.mode == "LAND":
-            log("FCU is in LAND (not armable). Switching to GUIDED_NOGPS first...")
-
-        # Ставим GUIDED_NOGPS ДО arm (как ты требуешь)
-        self.set_mode_verbose("GUIDED", timeout=10.0)
-
-        # Армим
-        self.arm_verbose(timeout=10.0)
-
-    def navigate_wait_verbose(self, x=0.0, y=0.0, z=0.0,
-                             speed=0.5, frame_id="body",
-                             yaw=float("nan"),
-                             tolerance=0.2,
-                             timeout=30.0,
-                             auto_arm=False):
-        """
-        auto_arm=False — потому что мы уже сделали GUIDED_NOGPS -> arm заранее.
-        """
-        log(f"navigate(): x={x} y={y} z={z} speed={speed} frame={frame_id} auto_arm={auto_arm}")
-
-        res = self.navigate(x=x, y=y, z=z, yaw=yaw, speed=speed, frame_id=frame_id, auto_arm=auto_arm)
         if not res.success:
-            log(f"❌ navigate rejected: {res.message}")
-            raise RuntimeError(res.message)
-
-        log("navigate accepted; waiting for target...")
-
+            self.dump_statustext()
+            return False
         t0 = time.time()
-        while not rospy.is_shutdown():
-            telem = self.get_telemetry(frame_id="navigate_target")
-            dist = math.sqrt(telem.x**2 + telem.y**2 + telem.z**2)
+        while not rospy.is_shutdown() and time.time()-t0 < timeout:
+            if self.state and self.state.armed:
+                log("✅ armed=True")
+                return True
+            rospy.sleep(0.05)
+        self.dump_statustext()
+        return False
 
-            log(f"target error: x={telem.x:.2f} y={telem.y:.2f} z={telem.z:.2f} | dist={dist:.2f} m")
+    def try_set_home_current(self):
+        if not self.set_home_srv:
+            log("set_home service not available - skip")
+            return False
+        try:
+            # current_gps=True: автопилот попробует выставить home по текущей оценке
+            res = self.set_home_srv(True, 0.0, 0.0, 0.0, 0.0)
+            log(f"set_home: success={res.success} result={res.result}")
+            return res.success
+        except Exception as e:
+            log(f"set_home exception: {e}")
+            return False
 
-            if dist < tolerance:
-                log(f"✅ target reached in {time.time() - t0:.1f} s")
-                return
+    def takeoff(self, alt=1.0):
+        log(f"TAKEOFF to {alt:.2f}m (cmd/takeoff)")
+        try:
+            # lat/lon/yaw лучше не фиксировать (NaN), чтобы не улетать в (0,0)
+            res = self.takeoff_srv(
+                min_pitch=0.0,
+                yaw=math.nan,
+                latitude=math.nan,
+                longitude=math.nan,
+                altitude=float(alt),
+            )
+            log(f"takeoff ack: success={res.success} result={res.result}")
+            if not res.success:
+                self.dump_statustext()
+            return res.success
+        except Exception as e:
+            log(f"takeoff exception: {e}")
+            self.dump_statustext()
+            return False
 
-            if (time.time() - t0) > timeout:
-                raise RuntimeError(f"Navigate timed out after {timeout:.1f} s")
+    def send_body_velocity(self, vx, vy, vz, duration_s, hz=10):
+        """
+        vx,vy,vz в NED относительно корпуса:
+        +vx вперёд, +vy вправо, +vz вниз. (вверх = отрицательный vz)
+        Сообщение надо переотправлять регулярно, иначе Copter остановится через ~3 сек. :contentReference[oaicite:8]{index=8}
+        """
+        msg = PositionTarget()
+        msg.coordinate_frame = PositionTarget.FRAME_BODY_NED
+        msg.type_mask = (
+            PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
+            PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
+            PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
+        )
+        msg.velocity.x = vx
+        msg.velocity.y = vy
+        msg.velocity.z = vz
 
-            rospy.sleep(0.2)
-
-    def land_wait_verbose(self, timeout=60.0):
-        log("sending LAND command via drone/land ...")
-        self.land()
-
+        r = rospy.Rate(hz)
         t0 = time.time()
-        while not rospy.is_shutdown():
-            telem = self.get_telemetry()
-            log(f"landing... armed={telem.armed} mode={telem.mode} z={telem.z:.2f}")
+        while not rospy.is_shutdown() and time.time()-t0 < duration_s:
+            msg.header.stamp = rospy.Time.now()
+            self.sp_pub.publish(msg)
+            r.sleep()
 
-            if not telem.armed:
-                log("✅ landed and disarmed")
-                return
+        # stop
+        msg.velocity.x = 0.0
+        msg.velocity.y = 0.0
+        msg.velocity.z = 0.0
+        for _ in range(int(hz*0.5)):
+            msg.header.stamp = rospy.Time.now()
+            self.sp_pub.publish(msg)
+            r.sleep()
 
-            if (time.time() - t0) > timeout:
-                raise RuntimeError(f"Land timed out after {timeout:.1f} s")
+    def condition_yaw(self, deg, relative=True, yaw_speed=0.0, cw=True):
+        if not self.cmd_long_srv:
+            log("cmd/command (CommandLong) not available - skip yaw")
+            return False
+        # MAV_CMD_CONDITION_YAW = 115
+        direction = 1.0 if cw else -1.0
+        is_relative = 1.0 if relative else 0.0
+        try:
+            res = self.cmd_long_srv(
+                broadcast=False,
+                command=115,
+                confirmation=0,
+                param1=float(deg),
+                param2=float(yaw_speed),
+                param3=float(direction),
+                param4=float(is_relative),
+                param5=0.0, param6=0.0, param7=0.0
+            )
+            log(f"condition_yaw: success={res.success} result={res.result}")
+            if not res.success:
+                self.dump_statustext()
+            return res.success
+        except Exception as e:
+            log(f"condition_yaw exception: {e}")
+            return False
 
-            rospy.sleep(0.3)
+    def land(self):
+        if self.land_srv:
+            log("LAND via /mavros/cmd/land")
+            try:
+                res = self.land_srv(0.0, math.nan, math.nan, math.nan, 0.0)
+                log(f"land ack: success={res.success} result={res.result}")
+                if not res.success:
+                    self.dump_statustext()
+                return res.success
+            except Exception as e:
+                log(f"land exception: {e}")
 
+        log("LAND via set_mode LAND")
+        ok = self.set_mode_checked("LAND", timeout=5.0)
+        if not ok:
+            self.dump_statustext()
+        return ok
 
 def main():
-    f = Flight()
+    ap = APCloverLike()
 
-    # 1) GUIDED_NOGPS -> ARM (до navigate)
-    log("==== PREPARE (GUIDED_NOGPS -> ARM) ====")
-    f.ensure_guided_nogps_then_arm()
+    if not ap.wait_connected(10.0):
+        raise RuntimeError("No FCU connection")
+    if not ap.wait_pose(10.0):
+        raise RuntimeError("No local_position/pose (EKF not publishing local pose?)")
 
-    # 2) TAKEOFF: 1 m вверх в body
-    log("==== TAKEOFF to 1.0 m ====")
-    f.navigate_wait_verbose(z=+1.0, speed=0.5, frame_id="body", auto_arm=False, timeout=30.0)
+    log(f"connected=True mode={ap.state.mode} armed={ap.state.armed}")
 
-    # 3) HOLD
-    hold_sec = 5
-    log(f"==== HOLD ({hold_sec} sec) ====")
-    for i in range(hold_sec):
-        telem = f.get_telemetry()
-        log(f"hold {i+1}/{hold_sec}: x={telem.x:.2f} y={telem.y:.2f} z={telem.z:.2f} armed={telem.armed} mode={telem.mode}")
-        rospy.sleep(1.0)
+    # GUIDED -> ARM
+    if not ap.set_mode_checked("GUIDED"):
+        raise RuntimeError("Failed to set GUIDED")
+    if not ap.arm_checked():
+        raise RuntimeError("Arming failed (see STATUSTEXT)")
 
-    # 4) LAND
-    log("==== LAND ====")
-    f.land_wait_verbose(timeout=90.0)
+    # try set home (helpful for no-GPS setups)
+    ap.try_set_home_current()
 
-    log("mission complete ✅")
+    # TAKEOFF (must be before movement setpoints in most cases) :contentReference[oaicite:9]{index=9}
+    if not ap.takeoff(alt=1.0):
+        raise RuntimeError("Takeoff rejected (see STATUSTEXT)")
 
+    log("HOLD 3s")
+    rospy.sleep(3.0)
+
+    log("FORWARD 1m (0.3 m/s => ~3.3s)")
+    ap.send_body_velocity(vx=0.3, vy=0.0, vz=0.0, duration_s=3.4, hz=10)
+
+    log("YAW +90deg")
+    ap.condition_yaw(90, relative=True)
+    rospy.sleep(2.0)
+
+    log("FORWARD 1m again")
+    ap.send_body_velocity(vx=0.3, vy=0.0, vz=0.0, duration_s=3.4, hz=10)
+
+    log("LAND")
+    ap.land()
+
+    log("done ✅")
 
 if __name__ == "__main__":
     try:
