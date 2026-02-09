@@ -88,7 +88,7 @@ new ROSLIB.Topic({ ros: ros.ros, name: ros.priv + 'print', messageType: 'std_msg
 });
 
 new ROSLIB.Topic({ ros: ros.ros, name: ros.priv + 'error', messageType: 'std_msgs/String'}).subscribe(function(msg) {
-	alert('Error: ' + msg.data);
+	alert('Ошибка: ' + msg.data);
 });
 
 var runButton = document.getElementById('run');
@@ -126,7 +126,7 @@ ros.ros.on('close', update);
 ready.then(() => runButton.disabled = false);
 
 window.runProgram = function() {
-	if (ros.params.confirm_run && !confirm('Run program?')) return;
+	if (ros.params.confirm_run && !confirm('Запустить программу?')) return;
 
 	runRequest = true;
 	update();
@@ -149,7 +149,7 @@ window.land = function() {
 	window.stopProgram();
 	ros.landService.callService(new ROSLIB.ServiceRequest(), function(result) {
 	}, function(err) {
-		alert('Unable to land: ' + err);
+		alert('Не смог выполнить посадку: ' + err);
 	});
 }
 
@@ -211,7 +211,7 @@ function loadPrograms() {
 		updateChanged();
 	}, function(err) {
 		document.querySelector('.backend-fail').style.display = 'inline';
-		alert(`Error loading programs list.\n\nHave you enabled 'blocks' in drone.launch?`);
+		alert(`Не смог загрузить список программ.\n\nПроверьте, включены ли 'blocks' в drone.launch?`);
 		runButton.disabled = true;
 	})
 }
@@ -240,7 +240,7 @@ function saveProgram() {
 	var name = getProgramName();
 
 	if (!name) {
-		name = prompt('Enter new program name:');
+		name = prompt('Введите новое название программы:');
 		if (!name) {
 			programSelect.value = program;
 			return;
@@ -289,7 +289,7 @@ window.addEventListener('keydown', function(e) {
 
 programSelect.addEventListener('change', function(e) {
 	if (programSelect.value == '@clear') {
-		if (!confirm('Clear workspace?')) {
+		if (!confirm('Очистить рабочее пространство?')) {
 			programSelect.value = program;
 			return;
 		}
@@ -303,7 +303,7 @@ programSelect.addEventListener('change', function(e) {
 	} else {
 		// load program
 		if (program == '' || document.body.classList.contains('changed')) {
-			if (!confirm('Discard changes?')) {
+			if (!confirm('Откатить изменения?')) {
 				programSelect.value = program;
 				return;
 			}
