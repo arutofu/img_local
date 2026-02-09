@@ -1307,7 +1307,10 @@ sync_time_if_needed() {
     "https://www.ya.ru"
   do
     # Date: Mon, 26 Jan 2026 06:30:54 GMT
-    hdr_date="$(curl -fsSI --max-time 3 "$url" 2>/dev/null | awk -F': ' 'tolower($1)=="date"{print $2; exit}')"
+    hdr_date="$(
+      { curl -fsSI --max-time 3 "$url" 2>/dev/null || true; } \
+      | awk -F': ' 'tolower($1)=="date"{print $2; exit}'
+    )"
     if [[ -n "${hdr_date:-}" ]]; then
       # выставляем UTC
       if date -u -s "$hdr_date" >/dev/null 2>&1; then

@@ -65,9 +65,18 @@
             - sys_status
             - sys_time
             - vision_pose_estimate
+            - fake_gps
+            - statustext
+            - gps_input
             # - vision_speed_estimate
             # - waypoint
         </rosparam>
+
+        <!-- TF -->
+        <param name="local_position/tf/send" value="true"/>
+        <param name="local_position/tf/frame_id" value="map"/>
+        <param name="local_position/tf/child_frame_id" value="base_link"/>
+        <param name="tf/send" value="true"/>
     </node>
 
     <!-- remapped distance_sensor config -->

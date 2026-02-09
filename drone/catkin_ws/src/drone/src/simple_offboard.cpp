@@ -55,6 +55,7 @@
 
 #include <mavros_msgs/ParamGet.h>
 #include <drone/autopilot_type.h>
+#include <mavros_msgs/CommandTOL.h>
 
 using std::string;
 using std::isnan;
@@ -92,11 +93,17 @@ bool land_only_in_offboard, nav_from_sp, check_kill_switch;
 std::map<string, string> reference_frames;
 string terrain_frame_mode;
 
+bool ap_takeoff_enable;			// NEW for ardupilot
+double ap_takeoff_ground_z;		// NEW for ardupilot
+double ap_takeoff_timeout_s;	// NEW for ardupilot		
+double ap_takeoff_tol;			// NEW for ardupilot
+
 // Publishers
 ros::Publisher attitude_pub, attitude_raw_pub, position_pub, position_raw_pub, rates_pub, thrust_pub, state_pub;
 
 // Service clients
 ros::ServiceClient arming, set_mode;
+ros::ServiceClient takeoff;				// NEW for ardupilot
 
 // Containers
 ros::Timer setpoint_timer;
@@ -398,40 +405,74 @@ bool getTelemetry(GetTelemetry::Request& req, GetTelemetry::Response& res)
 // }
 
 // throws std::runtime_error
+// void offboardAndArm()
+// {
+// 	ros::Rate r(10);
+
+// 	// Switch to control mode (PX4: OFFBOARD, ArduPilot: GUIDED/GUIDED_NOGPS)
+// 	if (!isNavControlMode(state.mode)) {
+// 		auto start = ros::Time::now();
+// 		ROS_INFO("switch to %s", g_nav_mode.c_str());
+
+// 		mavros_msgs::SetMode sm;
+// 		sm.request.custom_mode = g_nav_mode;
+
+// 		if (!set_mode.call(sm))
+// 			throw std::runtime_error("Error calling set_mode service");
+
+// 		// wait for target mode
+// 		while (ros::ok()) {
+// 			ros::spinOnce();
+
+// 			if (isNavControlMode(state.mode)) {
+// 				break;
+// 			} else if (ros::Time::now() - start > offboard_timeout) {
+// 				string report = g_nav_mode + " timed out";
+// 				if (statustext.header.stamp > start)
+// 					report += ": " + statustext.text;
+// 				throw std::runtime_error(report);
+// 			}
+
+// 			r.sleep();
+// 		}
+// 	}
+
+// 	// Arm
+// 	if (!state.armed) {
+// 		ros::Time start = ros::Time::now();
+// 		ROS_INFO("arming");
+
+// 		mavros_msgs::CommandBool srv;
+// 		srv.request.value = true;
+// 		if (!arming.call(srv))
+// 			throw std::runtime_error("Error calling arming service");
+
+// 		// wait until armed
+// 		while (ros::ok()) {
+// 			ros::spinOnce();
+
+// 			if (state.armed) {
+// 				break;
+// 			} else if (ros::Time::now() - start > arming_timeout) {
+// 				string report = "Arming timed out";
+// 				if (statustext.header.stamp > start)
+// 					report += ": " + statustext.text;
+// 				throw std::runtime_error(report);
+// 			}
+
+// 			r.sleep();
+// 		}
+// 	}
+// }
+
+// throws std::runtime_error
 void offboardAndArm()
 {
 	ros::Rate r(10);
 
-	// Switch to control mode (PX4: OFFBOARD, ArduPilot: GUIDED/GUIDED_NOGPS)
-	if (!isNavControlMode(state.mode)) {
-		auto start = ros::Time::now();
-		ROS_INFO("switch to %s", g_nav_mode.c_str());
+	auto arm_if_needed = [&]() {
+		if (state.armed) return;
 
-		mavros_msgs::SetMode sm;
-		sm.request.custom_mode = g_nav_mode;
-
-		if (!set_mode.call(sm))
-			throw std::runtime_error("Error calling set_mode service");
-
-		// wait for target mode
-		while (ros::ok()) {
-			ros::spinOnce();
-
-			if (isNavControlMode(state.mode)) {
-				break;
-			} else if (ros::Time::now() - start > offboard_timeout) {
-				string report = g_nav_mode + " timed out";
-				if (statustext.header.stamp > start)
-					report += ": " + statustext.text;
-				throw std::runtime_error(report);
-			}
-
-			r.sleep();
-		}
-	}
-
-	// Arm
-	if (!state.armed) {
 		ros::Time start = ros::Time::now();
 		ROS_INFO("arming");
 
@@ -440,14 +481,13 @@ void offboardAndArm()
 		if (!arming.call(srv))
 			throw std::runtime_error("Error calling arming service");
 
-		// wait until armed
 		while (ros::ok()) {
 			ros::spinOnce();
 
-			if (state.armed) {
-				break;
-			} else if (ros::Time::now() - start > arming_timeout) {
-				string report = "Arming timed out";
+			if (state.armed) return;
+
+			if (ros::Time::now() - start > arming_timeout) {
+				std::string report = "Arming timed out";
 				if (statustext.header.stamp > start)
 					report += ": " + statustext.text;
 				throw std::runtime_error(report);
@@ -455,9 +495,103 @@ void offboardAndArm()
 
 			r.sleep();
 		}
+	};
+
+	auto set_mode_and_wait = [&](const std::string& mode) {
+		if (state.mode == mode) return;
+
+		auto start = ros::Time::now();
+		ROS_INFO("switch to %s", mode.c_str());
+
+		mavros_msgs::SetMode sm;
+		sm.request.custom_mode = mode;
+
+		if (!set_mode.call(sm))
+			throw std::runtime_error("Error calling set_mode service");
+
+		while (ros::ok()) {
+			ros::spinOnce();
+
+			if (state.mode == mode) return;
+
+			if (ros::Time::now() - start > offboard_timeout) {
+				std::string report = mode + " timed out";
+				if (statustext.header.stamp > start)
+					report += ": " + statustext.text;
+				throw std::runtime_error(report);
+			}
+
+			r.sleep();
+		}
+	};
+
+	// ====== PX4 vs ArduPilot split ======
+	if (g_ap_type == AutopilotType::ARDUPILOT) {
+		// ArduPilot often refuses GUIDED before arming.
+		// So: ARM first (in current mode, typically STABILIZE), then switch to GUIDED/GUIDED_NOGPS.
+		arm_if_needed();
+		if (!isNavControlMode(state.mode)) {
+			set_mode_and_wait(g_nav_mode);
+		}
+	} else {
+		// PX4: switch to OFFBOARD first, then ARM
+		if (!isNavControlMode(state.mode)) {
+			set_mode_and_wait(g_nav_mode);
+		}
+		arm_if_needed();
 	}
 }
 
+void apTakeoffTo(double target_alt, double timeout_s, double tol)	// NEW for ardupilot
+{
+    if (!state.armed)
+        throw std::runtime_error("Takeoff requested but vehicle is not armed");
+
+    if (!isNavControlMode(state.mode))
+        throw std::runtime_error("Takeoff requested but vehicle not in nav mode: " + g_nav_mode);
+
+    mavros_msgs::CommandTOL srv;
+    srv.request.min_pitch = 0.0;
+    srv.request.yaw = 0.0;
+    // srv.request.latitude = 0.0;
+    // srv.request.longitude = 0.0;
+	if (hasGpsFix()) {
+		srv.request.latitude = global_position.latitude;
+		srv.request.longitude = global_position.longitude;
+	} else {
+		// без GPS не шлём takeoff вовсе — пусть вызывающий код решает fallback
+		throw std::runtime_error("TAKEOFF skipped: no GPS fix (ArduPilot often rejects MAV_CMD_NAV_TAKEOFF without fix/home)");
+	}
+
+    srv.request.altitude = target_alt;
+
+    ROS_WARN("[simple_offboard] ArduPilot TAKEOFF to alt=%.2f", target_alt);
+
+    if (!takeoff.call(srv))
+        throw std::runtime_error("Can't call /mavros/cmd/takeoff");
+
+    // if (!srv.response.success)
+    //     throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
+	if (!srv.response.success)
+		throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
+
+    ros::Rate r(20);
+    auto start = ros::Time::now();
+    while (ros::ok()) {
+        ros::spinOnce();
+
+        double z = local_position.pose.position.z;
+        if (z >= target_alt - tol) {
+            ROS_WARN("[simple_offboard] TAKEOFF reached z=%.2f", z);
+            return;
+        }
+
+        if ((ros::Time::now() - start).toSec() > timeout_s)
+            throw std::runtime_error("TAKEOFF timed out");
+
+        r.sleep();
+    }
+}
 
 inline double hypot(double x, double y, double z)
 {
@@ -549,6 +683,16 @@ void publishTarget(ros::Time stamp, bool _static = false)
 
 	static_transform_broadcaster->sendTransform(target);
 }
+
+// static bool is_ardupilot = false;
+
+// void init_autopilot_flag(ros::NodeHandle& nh_private)
+// {
+//   std::string ap;
+//   nh_private.param<std::string>("force_autopilot", ap, "");
+//   for (auto &c : ap) c = (char)tolower(c);
+//   is_ardupilot = (ap == "ardupilot");
+// }
 
 void publish(const ros::Time stamp)
 {
@@ -813,6 +957,17 @@ bool serve(enum setpoint_type_t sp_type, float x, float y, float z, float vx, fl
 		// Checks
 		checkState();
 
+		// ArduPilot: GUIDED_NOGPS не предназначен для position/velocity setpoints.
+		// Чтобы не было "accepted, но не летит" - режем такие команды явно.
+		if (g_ap_type == AutopilotType::ARDUPILOT && state.mode == "GUIDED_NOGPS") {
+			if (sp_type == NAVIGATE || sp_type == NAVIGATE_GLOBAL || sp_type == POSITION || sp_type == VELOCITY || sp_type == _ALTITUDE) {
+				throw std::runtime_error(
+					"ArduPilot: GUIDED_NOGPS doesn't support position/velocity navigation. "
+					"Use GUIDED for navigate(), or use set_attitude/set_rates in GUIDED_NOGPS."
+				);
+			}
+		}
+
 		if (auto_arm) {
 			checkManualControl();
 		}
@@ -870,6 +1025,38 @@ bool serve(enum setpoint_type_t sp_type, float x, float y, float z, float vx, fl
 
 			if (speed == 0)
 				speed = default_speed;
+		}
+
+		// --- ArduPilot takeoff stage for "takeoff via navigate(z>0, frame=body)" ---
+		if (g_ap_type == AutopilotType::ARDUPILOT && sp_type == NAVIGATE) {
+			// Важно: takeoff делаем только для относительного взлёта в body
+			if (frame_id == body.child_frame_id && isfinite(z) && z > 0.0f) {
+
+				// если auto_arm=true — для ArduPilot можно арм+mode сделать прямо сейчас
+				// (PX4 так нельзя, но это ветка APM)
+				if (auto_arm) {
+					offboardAndArm();
+					wait_armed = false;
+					auto_arm = false; // дальше логика не должна повторно ругаться
+				}
+
+				// если почти на земле — делаем takeoff
+				// double cur_z = local_position.pose.position.z;
+				// if (cur_z < ap_takeoff_ground_z) {
+				// 	double target_alt = cur_z + z; // z в body = дельта вверх
+				// 	apTakeoffTo(target_alt, ap_takeoff_timeout_s, ap_takeoff_tol);
+				// }
+				if (cur_z < ap_takeoff_ground_z && ap_takeoff_enable) {
+					double target_alt = cur_z + z;
+
+					try {
+						apTakeoffTo(target_alt, ap_takeoff_timeout_s, ap_takeoff_tol);
+					} catch (const std::exception& e) {
+						ROS_WARN("[simple_offboard] TAKEOFF failed (%s). Fallback to position setpoints (navigate).", e.what());
+						// НИЧЕГО не бросаем — продолжаем обычный navigate (позиционные setpoint’ы)
+					}
+				}
+			}
 		}
 
 		if (sp_type == NAVIGATE_GLOBAL) {
@@ -1211,6 +1398,13 @@ bool release(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res)
 	return true;
 }
 
+inline bool hasGpsFix()
+{
+    return std::isfinite(global_position.latitude) &&
+           std::isfinite(global_position.longitude) &&
+           global_position.status.status >= sensor_msgs::NavSatStatus::STATUS_FIX;
+}
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "simple_offboard");
@@ -1218,13 +1412,24 @@ int main(int argc, char **argv)
 	
 	// Detect autopilot
     g_ap_type = detectAutopilot(nh);
+
+	std::string force_ap = nh_priv.param<std::string>("force_autopilot", "");
+	if (!force_ap.empty()) {
+		std::string s = force_ap;
+		std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+		if (s == "ardupilot" || s == "apm") g_ap_type = AutopilotType::ARDUPILOT;
+		if (s == "px4") g_ap_type = AutopilotType::PX4;
+		ROS_WARN_STREAM("[simple_offboard] force_autopilot=" << force_ap
+			<< " -> " << autopilotName(g_ap_type));
+	}
+
     ROS_WARN_STREAM("[simple_offboard] Autopilot detected: " << autopilotName(g_ap_type));
     
     // Set mode mapping
     if (g_ap_type == AutopilotType::ARDUPILOT) {
     	// If you run without GPS and rely on external nav (VIO/flow), you may need GUIDED_NOGPS.
     	// Start with GUIDED, switch to GUIDED_NOGPS only if ArduPilot refuses GUIDED.
-    	g_nav_mode = nh_priv.param<std::string>("ap_nav_mode", "GUIDED");
+    	g_nav_mode = nh_priv.param<std::string>("ap_nav_mode", "GUIDED"); 
     	g_land_mode = nh_priv.param<std::string>("ap_land_mode", "LAND");
     } else {
     	// PX4 defaults
@@ -1253,6 +1458,11 @@ int main(int argc, char **argv)
 	nh_priv.param<string>("terrain_frame_mode", terrain_frame_mode, "altitude");
 	nh_priv.getParam("reference_frames", reference_frames);
 
+	nh_priv.param("ap_takeoff_enable", ap_takeoff_enable, false);		// NEW for ardupilot
+	nh_priv.param("ap_takeoff_ground_z", ap_takeoff_ground_z, 0.15);	// NEW for ardupilot
+	nh_priv.param("ap_takeoff_timeout", ap_takeoff_timeout_s, 12.0);	// NEW for ardupilot
+	nh_priv.param("ap_takeoff_tolerance", ap_takeoff_tol, 0.20);		// NEW for ardupilot
+
 	// Default reference frames
 	std::map<string, string> default_reference_frames;
 	default_reference_frames[body.child_frame_id] = local_frame;
@@ -1276,6 +1486,7 @@ int main(int argc, char **argv)
 	// Service clients
 	arming = nh.serviceClient<mavros_msgs::CommandBool>(mavros + "/cmd/arming");
 	set_mode = nh.serviceClient<mavros_msgs::SetMode>(mavros + "/set_mode");
+	takeoff = nh.serviceClient<mavros_msgs::CommandTOL>(mavros + "/cmd/takeoff");	// NEW for ardupilot
 
 	// Telemetry subscribers
 	auto state_sub = nh.subscribe(mavros + "/state", 1, &handleState);
