@@ -79,21 +79,21 @@ Blockly.Blocks['navigate'] = {
 			.appendField("Полёт в точку");
 		this.appendValueInput("X")
 			.setCheck("Number")
-			.appendField("forward");
+			.appendField("вперёд");
 		this.appendValueInput("Y")
 			.setCheck("Number")
-			.appendField("left");
+			.appendField("влево");
 		this.appendValueInput("LAT")
 			.setCheck("Number")
-			.appendField("latitude")
+			.appendField("широта")
 			.setVisible(false);
 		this.appendValueInput("LON")
 			.setCheck("Number")
-			.appendField("longitude")
+			.appendField("долгота")
 			.setVisible(false)
 		this.appendValueInput("Z")
 			.setCheck("Number")
-			.appendField("up");
+			.appendField("вверх");
 		this.appendDummyInput()
 			.appendField("относительно")
 			.appendField(new Blockly.FieldDropdown(navFrameId), "FRAME_ID");
