@@ -14,7 +14,7 @@ const COLOR_LED = 143;
 const COLOR_GPIO = 200;
 const DOCS_URL = '';
 
-var frameIds = [["body", "BODY"], ["markers map", "ARUCO_MAP"], ["marker", "ARUCO"], ["last navigate target", "NAVIGATE_TARGET"], ["map", "MAP"]];
+var frameIds = [["body", "BODY"], ["last navigate target", "NAVIGATE_TARGET"], ["map", "MAP"]];
 var frameIdsWithTerrain = frameIds.concat([["terrain", "TERRAIN"]]);
 
 function considerFrameId(e) {
@@ -24,9 +24,9 @@ function considerFrameId(e) {
 	// set appropriate coordinates labels
 	if (this.getInput('X')) { // block has x-y-z fields
 		if (frameId == 'BODY' || frameId == 'NAVIGATE_TARGET' || frameId == 'BASE_LINK' || frameId == 'TERRAIN') {
-			this.getInput('X').fieldRow[0].setValue('forward');
-			this.getInput('Y').fieldRow[0].setValue('left');
-			this.getInput('Z').fieldRow[0].setValue('up');
+			this.getInput('X').fieldRow[0].setValue('вперёд');
+			this.getInput('Y').fieldRow[0].setValue('влево');
+			this.getInput('Z').fieldRow[0].setValue('вверх');
 		} else {
 			this.getInput('X').fieldRow[0].setValue('x');
 			this.getInput('Y').fieldRow[0].setValue('y');
@@ -38,12 +38,10 @@ function considerFrameId(e) {
 			this.getInput('LON').setVisible(global);
 			this.getInput('X').setVisible(!global);
 			this.getInput('Y').setVisible(!global);
-			this.getInput('Z').fieldRow[0].setValue(frameId == 'GLOBAL' ? 'altitude' : 'z');
+			this.getInput('Z').fieldRow[0].setValue(frameId == 'GLOBAL' ? 'высота' : 'z');
 		}
 	}
-	if (this.getInput('ID')) { // block has marker id field
-		this.getInput('ID').setVisible(frameId == 'ARUCO'); // toggle id field
-	}
+
 	this.render();
 }
 
@@ -78,7 +76,7 @@ Blockly.Blocks['navigate'] = {
 		navFrameId.push(['global', 'GLOBAL_LOCAL'])
 		navFrameId.push(['global, WGS 84 alt.', 'GLOBAL'])
 		this.appendDummyInput()
-			.appendField("navigate to point");
+			.appendField("Полёт в точку");
 		this.appendValueInput("X")
 			.setCheck("Number")
 			.appendField("forward");
@@ -97,7 +95,7 @@ Blockly.Blocks['navigate'] = {
 			.setCheck("Number")
 			.appendField("up");
 		this.appendDummyInput()
-			.appendField("relative to")
+			.appendField("относительно")
 			.appendField(new Blockly.FieldDropdown(navFrameId), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
@@ -113,7 +111,7 @@ Blockly.Blocks['navigate'] = {
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Navigate to the specified point, coordinates are in meters.");
+		this.setTooltip("Полёт в указанную точку, координаты указываются в метрах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(considerFrameId);
 	}
@@ -122,7 +120,7 @@ Blockly.Blocks['navigate'] = {
 Blockly.Blocks['set_velocity'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("set velocity");
+			.appendField("Установить скорость");
 		this.appendValueInput("X")
 			.setCheck("Number")
 			.appendField("forward");
@@ -133,7 +131,7 @@ Blockly.Blocks['set_velocity'] = {
 			.setCheck("Number")
 			.appendField("up");
 		this.appendDummyInput()
-			.appendField("relative to")
+			.appendField("относительно")
 			.appendField(new Blockly.FieldDropdown(frameIds), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
@@ -143,7 +141,7 @@ Blockly.Blocks['set_velocity'] = {
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Set the drone velocity in meters per second (cancels navigation requests).");
+		this.setTooltip("Устанавливает скорость дрона в метрах в секунду (отменяет запросы на полёт).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(considerFrameId);
 	}
@@ -154,7 +152,7 @@ Blockly.Blocks['setpoint'] = {
 		this.appendDummyInput()
 			.appendField("set");
 		this.appendDummyInput()
-			.appendField(new Blockly.FieldDropdown([["velocity", "VELOCITY"], ["attitude", "ATTITUDE"], ["angular rates", "RATES"]]), "TYPE");
+			.appendField(new Blockly.FieldDropdown([["скорость", "VELOCITY"], ["ориентацию", "ATTITUDE"], ["угловые скорости", "RATES"]]), "TYPE");
 		this.appendValueInput("VX")
 			.setCheck("Number")
 			.appendField("vx");
@@ -166,22 +164,22 @@ Blockly.Blocks['setpoint'] = {
 			.appendField("vz");
 		this.appendValueInput("ROLL")
 			.setCheck("Number")
-			.appendField("roll")
+			.appendField("крен")
 			.setVisible(false);
 		this.appendValueInput("PITCH")
 			.setCheck("Number")
-			.appendField("pitch")
+			.appendField("тангаж")
 			.setVisible(false);
 		this.appendValueInput("YAW")
 			.setCheck("Number")
-			.appendField("yaw")
+			.appendField("рыскание")
 			.setVisible(false);
 		this.appendValueInput("THRUST")
 			.setCheck("Number")
-			.appendField("thrust")
+			.appendField("газ")
 			.setVisible(false);
 		this.appendDummyInput('RELATIVE_TO')
-			.appendField("relative to")
+			.appendField("относительно")
 			.appendField(new Blockly.FieldDropdown(frameIds), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
@@ -191,7 +189,7 @@ Blockly.Blocks['setpoint'] = {
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Set the drone's setpoints of different types (cancels navigation requests).");
+		this.setTooltip("Устанавливает целевые параметры различных типов (отменяет запросы на полёт).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(updateSetpointBlock);
 	}
@@ -200,7 +198,7 @@ Blockly.Blocks['setpoint'] = {
 Blockly.Blocks['rangefinder_distance'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current rangefinder distance");
+			.appendField("Текущее расстояние до дальномера");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
 		this.setTooltip("");
@@ -211,17 +209,17 @@ Blockly.Blocks['rangefinder_distance'] = {
 Blockly.Blocks['get_position'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current")
+			.appendField("Текущее положение")
 			.appendField(new Blockly.FieldDropdown([["x", "X"], ["y", "Y"], ["z", "Z"], ["vx", "VX"], ["vy", "VY"], ["vz", "VZ"]]), "FIELD")
-			.appendField("relative to")
+			.appendField("относительно")
 			.appendField(new Blockly.FieldDropdown(frameIdsWithTerrain), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
-			.appendField("with ID")
+			.appendField("с ID")
 			.setVisible(false)
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current position or velocity in meters or meters per second.");
+		this.setTooltip("Возвращает текущее положение (в метрах) или скорость (в м/с).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(considerFrameId);
 	}
@@ -230,15 +228,15 @@ Blockly.Blocks['get_position'] = {
 Blockly.Blocks['get_yaw'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current yaw relative to")
+			.appendField("Текущее рыскание относительно")
 			.appendField(new Blockly.FieldDropdown(frameIds), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
-			.appendField("with ID")
+			.appendField("с ID")
 			.setVisible(false)
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current yaw in degree (not radian).");
+		this.setTooltip("Возвращает текущее рыскание в градусах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(considerFrameId);
 	}
@@ -247,11 +245,11 @@ Blockly.Blocks['get_yaw'] = {
 Blockly.Blocks['get_attitude'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current")
-			.appendField(new Blockly.FieldDropdown([["roll", "ROLL"], ["pitch", "PITCH"], ["roll rate", "ROLL_RATE"], ["pitch rate", "PITCH_RATE"], ["yaw rate", "YAW_RATE"]]), "FIELD");
+			.appendField("Текущая ориентация")
+			.appendField(new Blockly.FieldDropdown([["крен", "ROLL"], ["тангаж", "PITCH"], ["угловая скорость крена", "ROLL_RATE"], ["угловая скорость тангажа", "PITCH_RATE"], ["угловая скорость рыскания", "YAW_RATE"]]), "FIELD");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current orientation or angle rates in degree or degree per second (not radian).");
+		this.setTooltip("Возвращает текущую ориентацию (в градусах) или угловые скорости (в градусах в секунду).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -259,12 +257,11 @@ Blockly.Blocks['get_attitude'] = {
 Blockly.Blocks['voltage'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current")
-			.appendField(new Blockly.FieldDropdown([["total", "VOLTAGE"], ["cell", "CELL_VOLTAGE"]]), "TYPE")
-			.appendField("voltage");
+			.appendField("Текущее напряжение")
+			.appendField(new Blockly.FieldDropdown([["общее", "VOLTAGE"], ["в ячейках", "CELL_VOLTAGE"]]), "TYPE");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current battery voltage in volts.");
+		this.setTooltip("Возвращает текущий заряд аккумулятора в вольтах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -272,13 +269,13 @@ Blockly.Blocks['voltage'] = {
 Blockly.Blocks['get_rc'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("RC channel")
+			.appendField("Канал АУ")
 		this.appendValueInput("CHANNEL")
 			.setCheck("Number");
 		this.setInputsInline(true);
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current RC channel value.");
+		this.setTooltip("Возвращает текущее значение канала аппаратуры управления");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 }
@@ -286,10 +283,10 @@ Blockly.Blocks['get_rc'] = {
 Blockly.Blocks['armed'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("armed?");
+			.appendField("Моторы включены?");
 		this.setOutput(true, "Boolean");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns if the drone armed.");
+		this.setTooltip("Возвращает логическое значение, указывающее, включены ли моторы дрона.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -298,10 +295,10 @@ Blockly.Blocks['armed'] = {
 Blockly.Blocks['mode'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current flight mode");
+			.appendField("Текущий режим полёта");
 		this.setOutput(true, "String");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current flight mode (POSCTL, OFFBOARD, etc).");
+		this.setTooltip("Возвращает текущий режим полёта (STABILIZE, GUIDED, и т.д.).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -310,11 +307,11 @@ Blockly.Blocks['mode'] = {
 Blockly.Blocks['wait_arrival'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("wait arrival");
+			.appendField("Ждать прибытия");
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Wait until the drone arrives to the navigation target.");
+		this.setTooltip("Ждать, пока дрон не прилетит к цели полёта.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -322,10 +319,10 @@ Blockly.Blocks['wait_arrival'] = {
 Blockly.Blocks['get_time'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("time");
+			.appendField("Время");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current timestamp in seconds.");
+		this.setTooltip("Возвращает текущее время в секундах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -333,10 +330,10 @@ Blockly.Blocks['get_time'] = {
 Blockly.Blocks['arrived'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("arrived?");
+			.appendField("Прибыл?");
 		this.setOutput(true, "Boolean");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns if the drone arrived to the navigation target.");
+		this.setTooltip("Возвращает логическое значение, указывающее, прибыл ли дрон к цели полёта.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -344,17 +341,17 @@ Blockly.Blocks['arrived'] = {
 Blockly.Blocks['set_led'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("set LED");
+			.appendField("Установить цвет светодиода");
 		this.appendValueInput("INDEX")
 			.setCheck("Number");
 		this.appendValueInput("COLOR")
 			.setCheck("Colour")
-			.appendField("to color");
+			.appendField("на");
 		this.setInputsInline(true);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_LED);
-		this.setTooltip("Set an individual LED to specified color.");
+		this.setTooltip("Устанавливает цвет индивидуального светодиода на указанный.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -362,16 +359,16 @@ Blockly.Blocks['set_led'] = {
 Blockly.Blocks['set_effect'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("set LED effect")
-			.appendField(new Blockly.FieldDropdown([["fill", "FILL"], ["blink", "BLINK"], ["fast blink", "BLINK_FAST"], ["fade", "FADE"], ["wipe", "WIPE"], ["flash", "FLASH"], ["rainbow", "RAINBOW"], ["rainbow fill", "RAINBOW_FILL"]]), "EFFECT");
+			.appendField("Установить эффект светодиодов на")
+			.appendField(new Blockly.FieldDropdown([["заполнение", "FILL"], ["мигание", "BLINK"], ["быстрое мигание", "BLINK_FAST"], ["угасание", "FADE"], ["замену", "WIPE"], ["вспышку", "FLASH"], ["радугу", "RAINBOW"], ["заполнение радугой", "RAINBOW_FILL"]]), "EFFECT");
 		this.appendValueInput("COLOR")
 			.setCheck("Colour")
-			.appendField("with color");
+			.appendField("с цветом");
 		this.setInputsInline(true);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_LED);
-		this.setTooltip("Set desired LED strip effect.");
+		this.setTooltip("Устанавливает желаемый эффект светодиодов.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 
 		this.setOnChange(function(e) {
@@ -389,10 +386,10 @@ Blockly.Blocks['set_effect'] = {
 Blockly.Blocks['led_count'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("LED count");
+			.appendField("Количество светодиодов");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_LED);
-		this.setTooltip("Returns the number of LEDs (configured in led.launch).");
+		this.setTooltip("Возвращает количество светодиодов (настраивается в led.launch).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -401,14 +398,14 @@ Blockly.Blocks['take_off'] = {
 	init: function () {
 		this.appendValueInput("ALT")
 			.setCheck("Number")
-			.appendField("take off to");
+			.appendField("Взлёт на");
 		this.appendDummyInput()
-			.appendField("wait")
+			.appendField("подождать")
 			.appendField(new Blockly.FieldCheckbox("TRUE"), "WAIT");
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Take off on desired altitude in meters.");
+		this.setTooltip("Взлёт на желаемую высоту в метрах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -416,15 +413,15 @@ Blockly.Blocks['take_off'] = {
 Blockly.Blocks['land'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("land");
+			.appendField("Приземлиться");
 		this.appendDummyInput()
-			.appendField("wait")
+			.appendField("подождать")
 			.appendField(new Blockly.FieldCheckbox("TRUE"), "WAIT");
 		this.setInputsInline(true);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Land the drone.");
+		this.setTooltip("Приземлить дрон.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -432,11 +429,11 @@ Blockly.Blocks['land'] = {
 Blockly.Blocks['global_position'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("current")
-			.appendField(new Blockly.FieldDropdown([["latitude", "LAT"], ["longitude", "LON"], ["altitude", "ALT"]]), "FIELD");
+			.appendField("Текущая глобальная позиция")
+			.appendField(new Blockly.FieldDropdown([["широта", "LAT"], ["долгота", "LON"], ["высота", "ALT"]]), "FIELD");
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns current global position (latitude, longitude, altitude above the WGS 84 ellipsoid).");
+		this.setTooltip("Возвращает текущую глобальную позицию (широта, долгота, высота над эллипсоидом WGS 84).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -445,7 +442,7 @@ Blockly.Blocks['on_take_off'] = {
 	init: function () {
 		this.appendStatementInput("TAKE_OFF")
 			.setCheck(null)
-			.appendField("When took off");
+			.appendField("При успешном взлёте");
 		this.setColour(230);
 		this.setTooltip("");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
@@ -456,7 +453,7 @@ Blockly.Blocks['on_landing'] = {
 	init: function () {
 		this.appendStatementInput("LAND")
 			.setCheck(null)
-			.appendField("When landed");
+			.appendField("При успешной посадке");
 		this.setColour(230);
 		this.setTooltip("");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
@@ -467,7 +464,7 @@ Blockly.Blocks['on_armed'] = {
 	init: function () {
 		this.appendStatementInput("ARMED")
 			.setCheck(null)
-			.appendField("when armed");
+			.appendField("При включённых моторах");
 		this.setColour(230);
 		this.setTooltip("");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
@@ -492,10 +489,10 @@ Blockly.Blocks['set_yaw'] = {
 	init: function () {
 		this.appendValueInput("YAW")
 			.setCheck("Number")
-			.appendField("rotate by");
+			.appendField("Повернуть на");
 		this.appendDummyInput()
-			.appendField("relative to")
-			.appendField(new Blockly.FieldDropdown([["body", "body"], ["markers map", "aruco_map"], ["last navigate target", "navigate_target"]]), "FRAME_ID");
+			.appendField("относительно")
+			.appendField(new Blockly.FieldDropdown([["body", "body"], ["last navigate target", "navigate_target"]]), "FRAME_ID");
 		this.appendDummyInput()
 			.appendField("wait")
 			.appendField(new Blockly.FieldCheckbox("TRUE"), "WAIT");
@@ -503,7 +500,7 @@ Blockly.Blocks['set_yaw'] = {
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
-		this.setTooltip("Rotate the drone to the specified angle in degree (not radian).");
+		this.setTooltip("Поворачивает дрон на заданное количество градусов (не радиан).");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 	}
 };
@@ -511,7 +508,7 @@ Blockly.Blocks['set_yaw'] = {
 Blockly.Blocks['distance'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("distance to point");
+			.appendField("Расстояние до точки");
 		this.appendValueInput("X")
 			.setCheck("Number")
 			.appendField("x");
@@ -522,16 +519,16 @@ Blockly.Blocks['distance'] = {
 			.setCheck("Number")
 			.appendField("z");
 		this.appendDummyInput()
-			.appendField("relative to")
-			.appendField(new Blockly.FieldDropdown([["markers map", "ARUCO_MAP"], ["marker", "ARUCO"], ["last navigate target", "NAVIGATE_TARGET"], ["terrain", "TERRAIN"]]), "FRAME_ID");
+			.appendField("относительно")
+			.appendField(new Blockly.FieldDropdown([["last navigate target", "NAVIGATE_TARGET"], ["terrain", "TERRAIN"]]), "FRAME_ID");
 		this.appendValueInput("ID")
 			.setCheck("Number")
-			.appendField("with ID")
+			.appendField("с ID")
 			.setVisible(false);
 		this.setInputsInline(false);
 		this.setOutput(true, "Number");
 		this.setColour(COLOR_STATE);
-		this.setTooltip("Returns the distance to the given point in meters.");
+		this.setTooltip("Возвращает расстояние до указанной точки в метрах.");
 		this.setHelpUrl(DOCS_URL + '#' + this.type);
 		this.setOnChange(considerFrameId);
 	}
@@ -540,11 +537,11 @@ Blockly.Blocks['distance'] = {
 Blockly.Blocks['wait'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("wait");
+			.appendField("Ждать");
 		this.appendValueInput("TIME")
 			.setCheck("Number");
 		this.appendDummyInput()
-			.appendField("seconds");
+			.appendField("секунд");
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
 		this.setColour(COLOR_FLIGHT);
@@ -558,9 +555,9 @@ var keys = [['up', 'UP'], ['down', 'DOWN'], ['left', 'LEFT'], ['right', 'RIGHT']
 Blockly.Blocks['key_pressed'] = {
 	init: function () {
 		this.appendDummyInput()
-			.appendField("key")
+			.appendField("Клавиша")
 			.appendField(new Blockly.FieldDropdown(keys, "NAME"))
-			.appendField("pressed");
+			.appendField("нажата");
 		this.appendStatementInput("PRESSED")
 			.setCheck(null);
 		this.setPreviousStatement(true, null);
@@ -575,10 +572,10 @@ Blockly.Blocks['gpio_read'] = {
 	init: function () {
 		this.appendValueInput("PIN")
 			.setCheck("Number")
-			.appendField("read GPIO pin");
+			.appendField("Прочитать контакт GPIO");
 		this.setOutput(true, "Boolean");
 		this.setColour(COLOR_GPIO);
-		this.setTooltip("Returns if there is voltage on a GPIO pin.");
+		this.setTooltip("Возвращает логическое значение, указывающее, есть ли напряжение на контакте GPIO.");
 		this.setHelpUrl(DOCS_URL + '#GPIO');
 	}
 };
@@ -587,7 +584,7 @@ Blockly.Blocks['gpio_write'] = {
 	init: function () {
 		this.appendValueInput("PIN")
 			.setCheck("Number")
-			.appendField("set GPIO pin");
+			.appendField("Установить контакт GPIO");
 		this.appendValueInput("LEVEL")
 			.setCheck("Boolean")
 			.appendField("to");
@@ -595,7 +592,7 @@ Blockly.Blocks['gpio_write'] = {
 		this.setColour(COLOR_GPIO);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
-		this.setTooltip("Set GPIO pin level.");
+		this.setTooltip("Записывает значение в контакт GPIO.");
 		this.setHelpUrl(DOCS_URL + '#GPIO');
 	}
 };
@@ -604,15 +601,15 @@ Blockly.Blocks['set_servo'] = {
 	init: function () {
 		this.appendValueInput("PIN")
 			.setCheck("Number")
-			.appendField("set GPIO pin");
+			.appendField("Установить контакт GPIO");
 		this.appendValueInput("PWM")
 			.setCheck("Number")
-			.appendField("to PWM");
+			.appendField("в значение ШИМ");
 		this.setInputsInline(true);
 		this.setColour(COLOR_GPIO);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
-		this.setTooltip("Set PWM on a GPIO pin to control servo. PWM is specified in range of 500–2500 μs.");
+		this.setTooltip("Записывает значение ШИМ в контакт GPIO для управления сервоприводом. ШИМ указывается в диапазоне 500–2500 мкс.");
 		this.setHelpUrl(DOCS_URL + '#GPIO');
 	}
 };
@@ -621,15 +618,15 @@ Blockly.Blocks['set_duty_cycle'] = {
 	init: function () {
 		this.appendValueInput("PIN")
 			.setCheck("Number")
-			.appendField("set GPIO pin");
+			.appendField("Установить контакт GPIO");
 		this.appendValueInput("DUTY_CYCLE")
 			.setCheck("Number")
-			.appendField("to duty cycle");
+			.appendField("в значение коэффициента заполнения");
 		this.setInputsInline(true);
 		this.setColour(COLOR_GPIO);
 		this.setPreviousStatement(true, null);
 		this.setNextStatement(true, null);
-		this.setTooltip("Set PWM duty cycle on a GPIO pin (better to control LEDs, etc). Duty cycle is set in range of 0–1.");
+		this.setTooltip("Записывает значение коэффициента заполнения ШИМ в контакт GPIO (для управления яркостью светодиодов, и т.д.). Коэффициент заполнения указывается в диапазоне 0.0 - 1.0.");
 		this.setHelpUrl(DOCS_URL + '#GPIO');
 	}
 };

@@ -22,7 +22,6 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <std_srvs/Trigger.h>
-// #include <aruco_pose/MarkerArray.h>
 
 using std::string;
 using namespace geometry_msgs;
@@ -165,10 +164,8 @@ int main(int argc, char **argv) {
 
 	auto pose_sub = nh_priv.subscribe<PoseStamped>("pose", 1, &callback);
 	auto pose_cov_sub = nh_priv.subscribe<PoseWithCovarianceStamped>("pose_cov", 1, &callback);
-	//auto markers_sub = nh_priv.subscribe<aruco_pose::MarkerArray>("markers", 1, &callback);
 
 	vpe_pub = nh_priv.advertise<PoseStamped>("vpe", 1);
-	//vpe_cov_pub = nh_priv_.advertise<PoseStamped>("pose_cov_pub", 1);
 
 	if (nh_priv.param("force_init", false) || nh_priv.param("publish_zero", false)) { // publish_zero is old name
 		// publish zero to initialize the local position
