@@ -168,15 +168,8 @@ export function generateCode(workspace) {
 function buildFrameId(block) {
 	let frame = block.getFieldValue('FRAME_ID').toLowerCase();
 	let id = Blockly.Python.valueToCode(block, 'ID', Blockly.Python.ORDER_NONE);
-	if (frame == 'aruco') { // aruco marker frame
-		if (id.match(/^[0-9]+$/)) { // id is positive integer
-			return `'${frame}_${id}'`;
-		} else { // something else...
-			return `'${frame}_' + str(int(${id}))`;
-		}
-	} else {
-		return `'${frame}'`;
-	}
+
+	return `'${frame}'`;
 }
 
 Blockly.Python.navigate = function(block) {

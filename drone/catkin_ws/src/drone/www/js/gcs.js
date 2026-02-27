@@ -13,15 +13,15 @@ function speak(txt) {
 
 ros.on('connection', function () {
 	body.classList.add('connected');
-	titleEl.innerText = 'Connected';
+	titleEl.innerText = 'Подключён';
 });
 
 ros.on('close', function () {
-	titleEl.innerText = 'Disconnected';
+	titleEl.innerText = 'Отключён';
 	modeEl.innerHTML = '';
 	body.classList.remove('connected');
 	setTimeout(function() {
-		titleEl.innerText = 'Reconnecting';
+		titleEl.innerText = 'Переподключаюсь...';
 		ros.connect(url);
 	}, 2000);
 });
