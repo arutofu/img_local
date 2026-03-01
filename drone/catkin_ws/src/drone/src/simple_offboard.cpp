@@ -99,7 +99,7 @@ double ap_takeoff_timeout_s;	// NEW for ardupilot
 double ap_takeoff_tol;			// NEW for ardupilot
 
 // Publishers
-ros::Publisher attitude_pub, attitude_raw_pub, position_pub, position_raw_pub, rates_pub, thrust_pub, state_pub;
+ros::Publisher attitude_pub, attitude_raw_pub, position_pub, position_raw_pub, velocity_pub, rates_pub, thrust_pub, state_pub;
 
 // Service clients
 ros::ServiceClient arming, set_mode;
@@ -170,6 +170,7 @@ PoseStamped local_position;
 TwistStamped velocity;
 NavSatFix global_position;
 BatteryState battery;
+Range rangefinder;
 
 // Common subscriber callback template that stores message to the variable
 template<typename T, T& STORAGE>
@@ -259,6 +260,12 @@ void handleRange(const Range& range)
 	if (!std::isfinite(range.range)) return;
 	// TODO: check it's facing down
 	publishTerrain(range.range, range.header.stamp);
+}
+
+void handleRangefinder(const Range& msg)
+{
+    rangefinder = msg;     // сохраняем
+    handleRange(msg);      // оставляем старую логику terrain tf
 }
 
 #define TIMEOUT(msg, timeout) (msg.header.stamp.isZero() || (ros::Time::now() - msg.header.stamp > timeout))
@@ -542,7 +549,26 @@ void offboardAndArm()
 	}
 }
 
-void apTakeoffTo(double target_alt, double timeout_s, double tol)	// NEW for ardupilot
+static bool rangeValid(double &z)
+{
+    if (!std::isfinite(rangefinder.range)) return false;
+    if (rangefinder.range <= rangefinder.min_range) return false;
+    if (rangefinder.range >= rangefinder.max_range) return false;
+    z = rangefinder.range;
+    return true;
+}
+
+static void publishVz(double vz)
+{
+    TwistStamped msg;
+    msg.header.stamp = ros::Time::now();
+    msg.twist.linear.z = vz; // ENU: вверх
+    velocity_pub.publish(msg);
+}
+
+inline bool hasGpsFix();
+
+void apTakeoffTo(double target_alt, double timeout_s, double tol)
 {
     if (!state.armed)
         throw std::runtime_error("Takeoff requested but vehicle is not armed");
@@ -550,48 +576,101 @@ void apTakeoffTo(double target_alt, double timeout_s, double tol)	// NEW for ard
     if (!isNavControlMode(state.mode))
         throw std::runtime_error("Takeoff requested but vehicle not in nav mode: " + g_nav_mode);
 
-    mavros_msgs::CommandTOL srv;
-    srv.request.min_pitch = 0.0;
-    srv.request.yaw = 0.0;
-    // srv.request.latitude = 0.0;
-    // srv.request.longitude = 0.0;
-	if (hasGpsFix()) {
-		srv.request.latitude = global_position.latitude;
-		srv.request.longitude = global_position.longitude;
-	} else {
-		// без GPS не шлём takeoff вовсе — пусть вызывающий код решает fallback
-		throw std::runtime_error("TAKEOFF skipped: no GPS fix (ArduPilot often rejects MAV_CMD_NAV_TAKEOFF without fix/home)");
-	}
+    double z0 = NAN;
+    if (!rangeValid(z0))
+        throw std::runtime_error("No valid rangefinder data for NoGPS takeoff");
 
-    srv.request.altitude = target_alt;
+    ROS_WARN("[simple_offboard] NoGPS TAKEOFF via cmd_vel.z to range=%.2f (start=%.2f)", target_alt, z0);
 
-    ROS_WARN("[simple_offboard] ArduPilot TAKEOFF to alt=%.2f", target_alt);
+    const double rate_hz = 20.0;
+    ros::Rate r(rate_hz);
 
-    if (!takeoff.call(srv))
-        throw std::runtime_error("Can't call /mavros/cmd/takeoff");
+    // warmup setpoints
+    for (int i=0;i<int(rate_hz*1.0) && ros::ok();++i) {
+        publishVz(0.0);
+        ros::spinOnce();
+        r.sleep();
+    }
 
-    // if (!srv.response.success)
-    //     throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
-	if (!srv.response.success)
-		throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
-
-    ros::Rate r(20);
     auto start = ros::Time::now();
     while (ros::ok()) {
         ros::spinOnce();
 
-        double z = local_position.pose.position.z;
+        double z = NAN;
+        if (!rangeValid(z)) {
+            publishVz(0.0);
+            throw std::runtime_error("Rangefinder became invalid during takeoff");
+        }
+
         if (z >= target_alt - tol) {
-            ROS_WARN("[simple_offboard] TAKEOFF reached z=%.2f", z);
+            publishVz(0.0);
+            ROS_WARN("[simple_offboard] TAKEOFF reached range=%.2f", z);
             return;
         }
 
-        if ((ros::Time::now() - start).toSec() > timeout_s)
-            throw std::runtime_error("TAKEOFF timed out");
+        publishVz(0.30); // вверх 0.30 м/с (можно параметром)
+
+        if ((ros::Time::now() - start).toSec() > timeout_s) {
+            publishVz(0.0);
+            throw std::runtime_error("TAKEOFF timed out (NoGPS cmd_vel.z)");
+        }
 
         r.sleep();
     }
 }
+
+// void apTakeoffTo(double target_alt, double timeout_s, double tol)	// NEW for ardupilot
+// {
+//     if (!state.armed)
+//         throw std::runtime_error("Takeoff requested but vehicle is not armed");
+
+//     if (!isNavControlMode(state.mode))
+//         throw std::runtime_error("Takeoff requested but vehicle not in nav mode: " + g_nav_mode);
+
+//     mavros_msgs::CommandTOL srv;
+//     srv.request.min_pitch = 0.0;
+//     // Let FCU keep current yaw (more robust for non-GPS / external-nav setups)
+//     srv.request.yaw = NAN;
+//     // srv.request.latitude = 0.0;
+//     // srv.request.longitude = 0.0;
+// 	// latitude/longitude are optional here; for non-GPS stacks we pass NaN
+// 	if (hasGpsFix()) {
+// 		srv.request.latitude = global_position.latitude;
+// 		srv.request.longitude = global_position.longitude;
+// 	} else {
+// 		srv.request.latitude = NAN;
+// 		srv.request.longitude = NAN;
+// 	}
+
+//     srv.request.altitude = target_alt;
+
+//     ROS_WARN("[simple_offboard] ArduPilot TAKEOFF to alt=%.2f", target_alt);
+
+//     if (!takeoff.call(srv))
+//         throw std::runtime_error("Can't call /mavros/cmd/takeoff");
+
+//     // if (!srv.response.success)
+//     //     throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
+// 	if (!srv.response.success)
+// 		throw std::runtime_error("TAKEOFF rejected, result=" + std::to_string((int)srv.response.result));
+
+//     ros::Rate r(20);
+//     auto start = ros::Time::now();
+//     while (ros::ok()) {
+//         ros::spinOnce();
+
+//         double z = local_position.pose.position.z;
+//         if (z >= target_alt - tol) {
+//             ROS_WARN("[simple_offboard] TAKEOFF reached z=%.2f", z);
+//             return;
+//         }
+
+//         if ((ros::Time::now() - start).toSec() > timeout_s)
+//             throw std::runtime_error("TAKEOFF timed out");
+
+//         r.sleep();
+//     }
+// }
 
 inline double hypot(double x, double y, double z)
 {
@@ -792,17 +871,29 @@ void publish(const ros::Time stamp)
 		publishTarget(stamp);
 	}
 
-	if (setpoint_type == VELOCITY) {
-		// transform velocity to local frame
-		setpoint_velocity.header.stamp = stamp;
-		try {
-			setpoint_velocity_local = tf_buffer.transform(setpoint_velocity, local_frame, ros::Duration(0.05));
-		} catch (tf2::TransformException& ex) {
-			// can't transform velocity, use last known
-			ROS_WARN_THROTTLE(10, "can't transform: %s", ex.what());
-		}
+if (setpoint_type == VELOCITY) {
+	// transform velocity to local frame
+	setpoint_velocity.header.stamp = stamp;
+	try {
+		setpoint_velocity_local = tf_buffer.transform(setpoint_velocity, local_frame, ros::Duration(0.05));
+	} catch (tf2::TransformException& ex) {
+		// can't transform velocity, use last known
+		ROS_WARN_THROTTLE(10, "can't transform: %s", ex.what());
+	}
 
-		// publish velocity
+	// publish velocity
+	if (g_ap_type == AutopilotType::ARDUPILOT) {
+		// For ArduPilot + external nav, cmd_vel is usually more stable than setpoint_raw/local VELOCITY
+		TwistStamped vel_msg;
+		vel_msg.header.stamp = stamp;
+		vel_msg.header.frame_id = local_frame;
+		vel_msg.twist.linear.x = setpoint_velocity_local.vector.x;
+		vel_msg.twist.linear.y = setpoint_velocity_local.vector.y;
+		vel_msg.twist.linear.z = setpoint_velocity_local.vector.z;
+		// We only support yaw-rate here; absolute yaw should be set via set_yaw / navigate
+		vel_msg.twist.angular.z = (setpoint_yaw_type == YAW_RATE) ? setpoint_rates.z : 0.0;
+		velocity_pub.publish(vel_msg);
+	} else {
 		position_raw_msg.type_mask = PositionTarget::IGNORE_PX +
 		                             PositionTarget::IGNORE_PY +
 		                             PositionTarget::IGNORE_PZ +
@@ -815,6 +906,7 @@ void publish(const ros::Time stamp)
 		position_raw_msg.yaw_rate = setpoint_rates.z;
 		position_raw_pub.publish(position_raw_msg);
 	}
+}
 
 	if (setpoint_type == ATTITUDE) {
 		PoseStamped msg;
@@ -1041,13 +1133,16 @@ bool serve(enum setpoint_type_t sp_type, float x, float y, float z, float vx, fl
 				}
 
 				// если почти на земле — делаем takeoff
-				// double cur_z = local_position.pose.position.z;
+				//double cur_z = local_position.pose.position.z;
 				// if (cur_z < ap_takeoff_ground_z) {
 				// 	double target_alt = cur_z + z; // z в body = дельта вверх
 				// 	apTakeoffTo(target_alt, ap_takeoff_timeout_s, ap_takeoff_tol);
 				// }
+				// current altitude estimate in local frame
+				double cur_z = local_position.pose.position.z;
 				if (cur_z < ap_takeoff_ground_z && ap_takeoff_enable) {
-					double target_alt = cur_z + z;
+					// ArduPilot takeoff command expects relative target altitude (meters)
+					double target_alt = z;
 
 					try {
 						apTakeoffTo(target_alt, ap_takeoff_timeout_s, ap_takeoff_tol);
@@ -1504,7 +1599,7 @@ int main(int argc, char **argv)
 			altitude_sub = nh.subscribe(mavros + "/altitude", 1, &handleAltitude);
 		} else if (terrain_frame_mode == "range") {
 			string range_topic = nh_priv.param("range_topic", string("rangefinder/range"));
-			altitude_sub = nh.subscribe(range_topic, 1, &handleRange);
+			altitude_sub = nh.subscribe(range_topic, 1, &handleRangefinder);
 		} else {
 			ROS_FATAL("Unknown terrain_frame_mode: %s, valid values: altitude, range", terrain_frame_mode.c_str());
 			ros::shutdown();
@@ -1514,6 +1609,7 @@ int main(int argc, char **argv)
 	// Setpoint publishers
 	position_pub = nh.advertise<PoseStamped>(mavros + "/setpoint_position/local", 1);
 	position_raw_pub = nh.advertise<PositionTarget>(mavros + "/setpoint_raw/local", 1);
+	velocity_pub = nh.advertise<TwistStamped>(mavros + "/setpoint_velocity/cmd_vel", 1);
 	attitude_pub = nh.advertise<PoseStamped>(mavros + "/setpoint_attitude/attitude", 1);
 	attitude_raw_pub = nh.advertise<AttitudeTarget>(mavros + "/setpoint_raw/attitude", 1);
 	rates_pub = nh.advertise<TwistStamped>(mavros + "/setpoint_attitude/cmd_vel", 1);

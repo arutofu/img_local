@@ -1,0 +1,6 @@
+<launch>
+  <!-- дать MAVROS подняться -->
+  <node pkg="roslaunch" type="roslaunch" name="delay_dummy" args=""/>
+  <node pkg="rosbash" type="rosbash" name="set_interval_localpos"
+        args="-c 'sleep 3; rosservice call /mavros/set_message_interval \"{message_id: 32, message_rate: 20.0}\"'" />
+</launch>

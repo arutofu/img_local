@@ -30,6 +30,8 @@
 
     <node pkg="drone" type="ardupilot" name="ardupilot_adapter" output="screen" respawn="false" />
 
+    <node pkg="roslaunch" type="roslaunch" name="set_mavlink_intervals" args="$(find drone)/launch/set_intervals.launch"/>
+
     <!-- web video server -->
     <node name="web_video_server" pkg="web_video_server" type="web_video_server" if="$(arg web_video_server)" required="false" respawn="true" respawn_delay="5">
         <param name="default_stream_type" value="ros_compressed"/>
