@@ -1,7 +1,5 @@
 # Status
 
-Local image processing and streaming toolkit for robotics and computer vision experiments.
-
 This repository is a work-in-progress experimental project.
 
 ## Goal
