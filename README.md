@@ -11,6 +11,12 @@ PX4 and Ardupilot compatibility in one rpi image.
 `img_local` is a small experimental project designed to work with image data locally.  
 The repository contains tools and scripts for capturing, processing, and handling images in a local environment, with a focus on robotics and drone-related workflows.
 
+- [X] RPi image build
+  - First build ~30 min
+  - ~10–15 min if "drone" build runs
+  - ~5 min if "drone" rebuild does not run
+- [ ] PX4 and Ardupilot compatibility
+
 The project combines several technologies and languages:
 
 - **Python** — scripting and automation
